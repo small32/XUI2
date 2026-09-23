@@ -87,7 +87,7 @@ jobs:
   build-arm64:
     needs: prepare
     runs-on: ubuntu-22.04
-    container: dockcross/linux-arm64:latest-amd64
+    container: dockcross/linux-arm64-musl:latest
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       GOOS: linux
