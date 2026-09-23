@@ -569,7 +569,7 @@ show_menu() {
 ————————————————
   ${green}1.${plain} 安装 xui
   ${green}2.${plain} 更新 xui
-  ${green}3.${plain} 升级脚本
+  ${green}3.${plain} 升级 脚本
   ${green}4.${plain} 卸载 xui
 ————————————————
   ${green}5.${plain} 重置用户名密码
