@@ -460,7 +460,9 @@ ssl_cert_issue() {
         export CF_Key="${CF_GlobalKey}"
         export CF_Email="${CF_AccountEmail}"
         LOGI "正在通过 Cloudflare DNS 验证签发证书(域名: ${CF_Domain})..."
-        if ! "$acme_sh" --issue --dns dns_cf -d "${CF_Domain}" --log; then
+        # --force：同一域名已签过且未到期时 acme.sh 默认会跳过（Domains not changed），
+        # 手动重跑本菜单理应重新签发，这里强制重签以覆盖旧证书。
+        if ! "$acme_sh" --issue --dns dns_cf -d "${CF_Domain}" --log --force; then
             LOGE "证书签发失败,脚本退出"
             LOGI "详细日志请查看: ${acme_sh}.log"
             LOGI "可加 --debug 参数获取详细报错: $acme_sh --issue --dns dns_cf -d ${CF_Domain} --debug"
