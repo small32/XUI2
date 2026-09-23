@@ -29,6 +29,8 @@ jobs:
           VERSION: ${{ github.event.inputs.version || github.ref_name }}
         run: |
           if [ "$VERSION" = main ]; then VERSION=$(tr -d '\r\n' < config/version); fi
+          # tag 形如 v0.0.6，先剥掉 v 前缀再校验，便于用 tag 直接触发发布
+          VERSION=${VERSION#v}
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a version such as 0.0.1'; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
