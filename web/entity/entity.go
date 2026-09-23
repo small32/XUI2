@@ -40,6 +40,10 @@ type AllSetting struct {
 	RestrictedLoginEnable bool `json:"restrictedLoginEnable" form:"restrictedLoginEnable"`
 
 	TimeLocation string `json:"timeLocation" form:"timeLocation"`
+
+	// ExternalHost 被控端对外可达的主机名/域名（用于拼接 API 与订阅地址）。
+	// 仅 agent 使用；留空时用监听地址回退。
+	ExternalHost string `json:"externalHost" form:"externalHost"`
 }
 
 func (s *AllSetting) CheckValid() error {
@@ -80,4 +84,15 @@ func (s *AllSetting) CheckValid() error {
 	}
 
 	return nil
+}
+
+
+// AgentConnectionInfo 是被控端在自己面板设置页展示的只读连接信息。
+// Token 与指纹由服务层在请求时动态计算，不落库、不来自 AllSetting。
+type AgentConnectionInfo struct {
+	ApiUrl      string `json:"apiUrl"`
+	SubscribeUrl string `json:"subscribeUrl"`
+	Port        int    `json:"port"`
+	CertSha256  string `json:"certSha256"`
+	Token       string `json:"token"`
 }

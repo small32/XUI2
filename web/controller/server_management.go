@@ -32,6 +32,7 @@ func NewServerManagementController(g *gin.RouterGroup) *ServerManagementControll
 	g.POST("/server/setting", a.setting)
 	g.POST("/server/setting/all", a.getSetting)
 	g.POST("/server/nodes", a.nodes)
+	g.POST("/server/nodes/list", a.nodeList)
 	g.POST("/server/nodes/save", a.saveNode)
 	g.POST("/server/nodes/delete/:id", a.deleteNode)
 	g.POST("/server/tasks", a.tasks)
@@ -86,6 +87,10 @@ func (a *ServerManagementController) getSetting(c *gin.Context) {
 }
 func (a *ServerManagementController) nodes(c *gin.Context) {
 	v, err := a.service.Nodes()
+	jsonObj(c, v, err)
+}
+func (a *ServerManagementController) nodeList(c *gin.Context) {
+	v, err := a.service.ListNodes()
 	jsonObj(c, v, err)
 }
 func (a *ServerManagementController) saveNode(c *gin.Context) {

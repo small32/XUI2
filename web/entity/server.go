@@ -1,5 +1,17 @@
 package entity
 
+import "xui/database/model"
+
+// NodeRow 是被控端节点在列表页的展示形态：嵌入 ManagedNode 本体，
+// 并附加该节点在管理端本地的入站/流量聚合统计。
+type NodeRow struct {
+	model.ManagedNode
+	InboundCount int    `json:"inboundCount"`
+	Used         int64  `json:"used"`
+	UsedText     string `json:"usedText"`
+	EnabledCount int    `json:"enabledCount"`
+}
+
 type ServerSetting struct {
 	AutoDisable               bool   `json:"autoDisable" form:"autoDisable"`
 	HeartbeatMinutes          int    `json:"heartbeatMinutes" form:"heartbeatMinutes"`

@@ -245,15 +245,15 @@ func (s *ServerManagementService) GetSetting() (*entity.ServerSetting, error) {
 	if err := json.Unmarshal([]byte(row.Value), setting); err != nil {
 		return nil, err
 	}
-	if setting.HeartbeatMinutes < 10 {
-		setting.HeartbeatMinutes = 10
+	if setting.HeartbeatMinutes < 5 {
+		setting.HeartbeatMinutes = 5
 	}
 	return setting, nil
 }
 
 func (s *ServerManagementService) SaveSetting(setting *entity.ServerSetting) error {
-	if setting.HeartbeatMinutes < 10 {
-		return errors.New("心跳间隔不能低于 10 分钟")
+	if setting.HeartbeatMinutes < 5 {
+		return errors.New("心跳间隔不能低于 5 分钟")
 	}
 	b, err := json.Marshal(entity.ServerSetting{AutoDisable: setting.AutoDisable, HeartbeatMinutes: setting.HeartbeatMinutes})
 	if err != nil {

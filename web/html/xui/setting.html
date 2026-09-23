@@ -39,12 +39,25 @@
                         <a-tab-pane key="1" tab="面板配置">
                             <a-list item-layout="horizontal" style="background: white">
                                 {{if eq .role "manager"}}<setting-list-item type="switch" title="非管理员用户登录" desc="开启后允许非管理员用户（端口号+入站密码）登录；关闭则禁止受限账号登录，保存后立即生效" v-model="allSetting.restrictedLoginEnable"></setting-list-item>{{end}}
+                                {{if eq .role "agent"}}<setting-list-item type="text" title="对外主机名/域名" desc="被控端对外可达的域名或IP，用于拼接 API 与订阅地址；留空则使用监听地址" v-model="allSetting.externalHost"></setting-list-item>{{end}}
                                 <setting-list-item type="text" title="面板监听 IP" desc="默认留空监听所有 IP，重启面板生效" v-model="allSetting.webListen"></setting-list-item>
                                 <setting-list-item type="number" title="面板监听端口" desc="重启面板生效" v-model.number="allSetting.webPort"></setting-list-item>
                                 <setting-list-item type="text" title="面板证书公钥文件路径" desc="填写一个 '/' 开头的绝对路径，重启面板生效" v-model="allSetting.webCertFile"></setting-list-item>
                                 <setting-list-item type="text" title="面板证书密钥文件路径" desc="填写一个 '/' 开头的绝对路径，重启面板生效" v-model="allSetting.webKeyFile"></setting-list-item>
                                 <setting-list-item type="text" title="面板 url 根路径" desc="必须以 '/' 开头，以 '/' 结尾，重启面板生效" v-model="allSetting.webBasePath"></setting-list-item>
                             </a-list>
+                            {{if eq .role "agent"}}
+                            <a-divider>被控端连接信息</a-divider>
+                            <a-descriptions v-if="connInfo" :column="1" size="small" bordered style="margin-top:8px">
+                                <a-descriptions-item label="API 地址">[[connInfo.apiUrl||'-']]</a-descriptions-item>
+                                <a-descriptions-item label="订阅地址">[[connInfo.subscribeUrl||'-']]</a-descriptions-item>
+                                <a-descriptions-item label="被控端 API 令牌">
+                                    <span>[[showToken ? connInfo.token : '************']]</span>
+                                    <a-button v-if="connInfo.token" type="link" size="small" @click="showToken=!showToken">[[showToken?'隐藏':'显示']]</a-button>
+                                </a-descriptions-item>
+                                <a-descriptions-item label="证书 SHA256 指纹">[[connInfo.certSha256||'-']]</a-descriptions-item>
+                            </a-descriptions>
+                            {{end}}
                         </a-tab-pane>
                         <a-tab-pane key="2" tab="用户设置">
                             <a-form style="background: white; padding: 20px">
@@ -98,6 +111,8 @@
             allSetting: new AllSetting(),
             saveBtnDisable: true,
             user: {},
+            connInfo: null,
+            showToken: false,
         },
         methods: {
             loading(spinning = true) {
@@ -111,6 +126,12 @@
                     this.oldAllSetting = new AllSetting(msg.obj);
                     this.allSetting = new AllSetting(msg.obj);
                     this.saveBtnDisable = true;
+                }
+            },
+            async loadConnInfo() {
+                const msg = await HttpUtil.post("/xui/setting/connectionInfo");
+                if (msg.success) {
+                    this.connInfo = msg.obj || null;
                 }
             },
             async updateAllSetting() {
@@ -151,6 +172,7 @@
         },
         async mounted() {
             await this.getAllSetting();
+            await this.loadConnInfo();
             while (true) {
                 await PromiseUtil.sleep(1000);
                 this.saveBtnDisable = this.oldAllSetting.equals(this.allSetting);

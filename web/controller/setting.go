@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/gin-gonic/gin"
 	"time"
+	"xui/config"
 	"xui/web/entity"
 	"xui/web/service"
 	"xui/web/session"
@@ -35,6 +36,7 @@ func (a *SettingController) initRouter(g *gin.RouterGroup) {
 	g.POST("/update", a.updateSetting)
 	g.POST("/updateUser", a.updateUser)
 	g.POST("/restartPanel", a.restartPanel)
+	g.POST("/connectionInfo", a.connectionInfo)
 }
 
 func (a *SettingController) getAllSetting(c *gin.Context) {
@@ -44,6 +46,16 @@ func (a *SettingController) getAllSetting(c *gin.Context) {
 		return
 	}
 	jsonObj(c, allSetting, nil)
+}
+
+// connectionInfo 返回被控端(agent)对外连接信息；仅 agent 角色提供，其余角色返回空，避免泄露令牌与指纹。
+func (a *SettingController) connectionInfo(c *gin.Context) {
+	if config.Role() != "agent" {
+		jsonObj(c, &entity.AgentConnectionInfo{}, nil)
+		return
+	}
+	info, err := a.settingService.AgentConnectionInfo()
+	jsonObj(c, info, err)
 }
 
 func (a *SettingController) updateSetting(c *gin.Context) {

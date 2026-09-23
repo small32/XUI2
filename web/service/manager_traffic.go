@@ -33,6 +33,36 @@ type NodeUsage struct {
 	LastError  string `json:"lastError"`
 }
 
+// ListNodes 返回被控端节点列表，并为每个节点附加本地的入站/流量聚合统计。
+func (s *ServerManagementService) ListNodes() ([]entity.NodeRow, error) {
+	nodes, err := s.Nodes()
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]entity.NodeRow, 0, len(nodes))
+	for _, n := range nodes {
+		row := entity.NodeRow{ManagedNode: n}
+		var agg struct {
+			Cnt   int   `gorm:"column:cnt"`
+			Used  int64 `gorm:"column:used"`
+			OnCnt int   `gorm:"column:onCnt"`
+		}
+		err := database.GetDB().Model(&model.NodeTraffic{}).
+			Where("node_id = ?", n.Id).
+			Select("COUNT(*) AS cnt, COALESCE(SUM(up + down), 0) AS used, SUM(CASE WHEN enabled THEN 1 ELSE 0 END) AS on_cnt").
+			Scan(&agg).Error
+		if err != nil {
+			return nil, err
+		}
+		row.InboundCount = agg.Cnt
+		row.Used = agg.Used
+		row.UsedText = common.FormatTraffic(agg.Used)
+		row.EnabledCount = agg.OnCnt
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
 func (s *ServerManagementService) NodeUsage(port int) ([]NodeUsage, error) {
 	var account model.Inbound
 	if err := database.GetDB().Where("port = ?", port).First(&account).Error; err != nil {

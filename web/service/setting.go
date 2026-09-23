@@ -2,8 +2,13 @@ package service
 
 import (
 	_ "embed"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
@@ -31,6 +36,7 @@ var defaultValueMap = map[string]string{
 	"webBasePath":           "/",
 	"timeLocation":          "Asia/Shanghai",
 	"restrictedLoginEnable": "true",
+	"externalHost":          "",
 }
 
 type SettingService struct {
@@ -105,6 +111,18 @@ func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
 		err := setSetting(key, value)
 		if err != nil {
 			return nil, err
+		}
+	}
+
+	// 证书路径未显式配置时，默认指向 /root/cert 下的 fullchain.cer 与匹配的 *.key，
+	// 便于面板自动接管一键申请生成的可信证书（可在设置页据此看到实际生效路径）。
+	if allSetting.WebCertFile == "" || allSetting.WebKeyFile == "" {
+		defCert, defKey := defaultPanelCert()
+		if allSetting.WebCertFile == "" {
+			allSetting.WebCertFile = defCert
+		}
+		if allSetting.WebKeyFile == "" {
+			allSetting.WebKeyFile = defKey
 		}
 	}
 
@@ -207,11 +225,131 @@ func (s *SettingService) SetPort(port int) error {
 }
 
 func (s *SettingService) GetCertFile() (string, error) {
-	return s.getString("webCertFile")
+	c, err := s.getString("webCertFile")
+	if err != nil {
+		return "", err
+	}
+	if c == "" {
+		defCert, _ := defaultPanelCert()
+		return defCert, nil
+	}
+	return c, nil
 }
 
 func (s *SettingService) GetKeyFile() (string, error) {
-	return s.getString("webKeyFile")
+	k, err := s.getString("webKeyFile")
+	if err != nil {
+		return "", err
+	}
+	if k == "" {
+		_, defKey := defaultPanelCert()
+		return defKey, nil
+	}
+	return k, nil
+}
+
+// defaultPanelCert 返回 /root/cert 目录下的默认证书路径：
+// 证书为 fullchain.cer，私钥优先 fullchain.key，否则取目录中第一个 *.key。
+// /root/cert 不存在或无匹配文件时返回空串。
+func defaultPanelCert() (cert, key string) {
+	return panelCertIn("/root/cert")
+}
+
+// panelCertIn 在给定目录 A 中确定默认证书路径：证书为 fullchain.cer，
+// 私钥优先 fullchain.key，否则取目录中第一个 *.key。目录无匹配或访问失败返回空串。
+func panelCertIn(dir string) (cert, key string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", ""
+	}
+	cert = filepath.Join(dir, "fullchain.cer")
+	if _, err := os.Stat(cert); err != nil {
+		cert = ""
+	}
+	key = filepath.Join(dir, "fullchain.key")
+	if _, err := os.Stat(key); err != nil {
+		key = ""
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if strings.HasSuffix(e.Name(), ".key") {
+				key = filepath.Join(dir, e.Name())
+				break
+			}
+		}
+	}
+	return cert, key
+}
+
+func (s *SettingService) GetExternalHost() (string, error) {
+	return s.getString("externalHost")
+}
+
+// AgentConnectionInfo 计算被控端对外暴露的连接信息（仅 agent 使用）。
+// host 取手工填写的 ExternalHost，否则回退监听地址；token 与指纹动态读取、不落库。
+func (s *SettingService) AgentConnectionInfo() (*entity.AgentConnectionInfo, error) {
+	host, err := s.GetExternalHost()
+	if err != nil {
+		return nil, err
+	}
+	port, err := s.GetPort()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(host) == "" {
+		if listen, e := s.getListenHost(); e == nil {
+			host = listen
+		}
+	}
+	host = strings.TrimSpace(host)
+	base := "https://" + host
+	if port != 0 {
+		base += ":" + strconv.Itoa(port)
+	}
+	info := &entity.AgentConnectionInfo{
+		ApiUrl:       base + "/api/v1",
+		SubscribeUrl: base,
+		Port:         port,
+		Token:        os.Getenv("XUI_AGENT_TOKEN"),
+		CertSha256:   s.selfCertFingerprint(),
+	}
+	return info, nil
+}
+
+// getListenHost 返回 webListen 设置；若为空，尝试返回本机非回环 IPv4 地址。
+func (s *SettingService) getListenHost() (string, error) {
+	listen, err := s.getString("webListen")
+	if err != nil || strings.TrimSpace(listen) != "" {
+		return listen, err
+	}
+	addrs, perr := net.InterfaceAddrs()
+	if perr != nil {
+		return "", perr
+	}
+	for _, addr := range addrs {
+		ipnet, ok := addr.(*net.IPNet)
+		if !ok || ipnet.IP.IsLoopback() || ipnet.IP.To4() == nil {
+			continue
+		}
+		return ipnet.IP.String(), nil
+	}
+	return "", fmt.Errorf("无法确定本机 IP")
+}
+
+// selfCertFingerprint 读取当前面板证书并返回其 SHA256 指纹（hex 小写）。
+// 证书路径失败或读取失败时返回 "-"，不返回错误，避免初始化被阻断。
+func (s *SettingService) selfCertFingerprint() string {
+	certFile, err := s.GetCertFile()
+	if err != nil || strings.TrimSpace(certFile) == "" {
+		certFile = "/root/cert/fullchain.cer"
+	}
+	data, err := os.ReadFile(certFile)
+	if err != nil {
+		return "-"
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *SettingService) SetCertFiles(cert, key string) error {
