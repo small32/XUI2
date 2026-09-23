@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+{{template "head" .}}
+<body>
+<a-layout id="app" v-cloak>
+    {{template "commonSider" .}}
+    <a-layout id="content-layout">
+        <a-layout-content>
+            <a-card title="流量汇总">
+                <div style="margin-bottom:16px">
+                    <a-button type="primary" @click="load">刷新</a-button>
+                    <a-checkbox-group v-if="!restricted" v-model="filters" style="margin-left:16px">
+                        <a-checkbox value="enabled">已启用</a-checkbox>
+                        <a-checkbox value="disabled">已停用</a-checkbox>
+                        <a-checkbox value="overlimit">已超限</a-checkbox>
+                        <a-checkbox value="unknown">未确认</a-checkbox>
+                    </a-checkbox-group>
+                </div>
+                <a-table :data-source="visibleRows" :pagination="false" row-key="port">
+                    <a-table-column title="用户名" data-index="username"></a-table-column>
+                    <a-table-column title="端口" data-index="port"></a-table-column>
+                    <a-table-column title="被控端流量" data-index="remoteText"></a-table-column>
+                    <a-table-column title="总流量" data-index="totalText"></a-table-column>
+                    <a-table-column title="流量限制" data-index="limitText"></a-table-column>
+                    <a-table-column title="计费方式">
+                        <template slot-scope="text,row">
+                            <a-tag v-if="row.monthlyReset" color="blue">按月</a-tag>
+                            <a-tag v-else color="orange">累计</a-tag>
+                        </template>
+                    </a-table-column>
+                    <a-table-column title="状态">
+                        <template slot-scope="text,row">
+                            <a-tag v-if="row.status === 'enabled'" color="green">启用</a-tag>
+                            <a-tag v-else-if="row.status === 'overlimit'" color="red">超限停用</a-tag>
+                            <a-tag v-else-if="row.status === 'unknown'" color="orange">未确认</a-tag>
+                            <a-tag v-else>停用</a-tag>
+                        </template>
+                    </a-table-column>
+                    <a-table-column title="快照">
+                        <template slot-scope="text,row">
+                            <a-button type="link" size="small" @click="openSnapshots(row)">查看</a-button>
+                        </template>
+                    </a-table-column>
+                    <a-table-column title="节点明细"><template slot-scope="text,row"><a-button type="link" size="small" @click="openNodes(row)">查看</a-button></template></a-table-column>
+                </a-table>
+                <a-modal v-model="nodesModal.visible" :title="nodesModal.title" :footer="null" width="820px">
+                    <a-table :data-source="nodesModal.rows" row-key="nodeId" :pagination="false" size="small">
+                        <a-table-column title="被控端" data-index="name"></a-table-column>
+                        <a-table-column title="实际端口" data-index="remotePort"></a-table-column>
+                        <a-table-column title="上传" ><template slot-scope="text,row">[[sizeFormat(row.up)]]</template></a-table-column>
+                        <a-table-column title="下载" ><template slot-scope="text,row">[[sizeFormat(row.down)]]</template></a-table-column>
+                        <a-table-column title="用量" data-index="usedText"></a-table-column>
+                        <a-table-column title="更新时间"><template slot-scope="text,row">[[row.observedAt?new Date(row.observedAt*1000).toLocaleString():'暂无数据']]</template></a-table-column>
+                        <a-table-column title="状态"><template slot-scope="text,row">[[row.lastError?'读取失败：'+row.lastError:(row.observedAt?(row.enabled?'启用':'停用'):'待同步')]]</template></a-table-column>
+                    </a-table>
+                </a-modal>
+                <a-modal v-model="snapshotModal.visible" :title="snapshotModal.title" :footer="null" width="820px">
+                    <a-table :data-source="snapshotModal.rows" :loading="snapshotModal.loading"
+                             :pagination="false" row-key="yyyymm" size="small"
+                             :locale="{ emptyText: snapshotModal.emptyText }">
+                        <a-table-column title="月份" data-index="period"></a-table-column>
+                        <a-table-column title="被控端流量" data-index="remoteText"></a-table-column>
+                        <a-table-column title="总流量" data-index="usedText"></a-table-column>
+                        <a-table-column title="流量限制" data-index="limitText"></a-table-column>
+                    </a-table>
+                </a-modal>
+            </a-card>
+        </a-layout-content>
+    </a-layout>
+</a-layout>
+{{template "js" .}}
+<script>
+    new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#app',
+        data: {
+            siderDrawer,
+            restricted: {{ .restricted }},
+            rows: [],
+            // 三态筛选项，空数组表示不筛选、显示全部。仅管理员可见。
+            filters: [],
+            snapshotModal: {
+                visible: false,
+                loading: false,
+                title: '月度流量快照',
+                // 表格空数据的说明：按月与累计两种账号没有留档的原因不同，分开讲清楚。
+                emptyText: '',
+                rows: []
+            },
+            nodesModal: {visible:false,title:'节点流量',rows:[]}
+        },
+        computed: {
+            // 状态由后端判定（enabled／disabled／overlimit），页面只做并集过滤，
+            // 与入站列表页共用同一套口径，不会两边算出不同的结果。
+            visibleRows() {
+                if (!this.filters.length) return this.rows;
+                return this.rows.filter(row => this.filters.indexOf(row.status) >= 0);
+            }
+        },
+        methods: {
+            sizeFormat(value) { return value < 1024 ? value+' B' : (value/1024/1024).toFixed(2)+' MB'; },
+            async openNodes(row) {
+                this.nodesModal.title='节点流量 · 端口 '+row.port;
+                this.nodesModal.rows=[];
+                this.nodesModal.visible=true;
+                let m=await HttpUtil.post('/xui/traffic-summary/nodes/'+row.port);
+                if(m.success)this.nodesModal.rows=m.obj||[];else this.$message.error(m.msg);
+            },
+            async load() {
+                let m = await HttpUtil.post('/xui/traffic-summary/list');
+                if (m.success) this.rows = m.obj;
+                else this.$message.error(m.msg);
+            },
+            // 留档由后端按 yyyymm 从最近往最前排好，页面不再排序。
+            async openSnapshots(row) {
+                this.snapshotModal.title = '月度流量快照 · ' + (row.username || '未命名') + '（端口 ' + row.port + '）';
+                this.snapshotModal.rows = [];
+                // 没勾选“按月计算”的账号不进月度周期，本来就不会有月度留档，
+                // 这里把原因写明白，免得看起来像是数据丢了。
+                this.snapshotModal.emptyText = row.monthlyReset
+                    ? '暂无月度留档，每月 1 日清零时生成'
+                    : '该账号未勾选“按月计算”，不做月度清零，因此没有月度留档';
+                this.snapshotModal.visible = true;
+                this.snapshotModal.loading = true;
+                let m = await HttpUtil.post('/xui/traffic-summary/snapshots', {inboundId: row.inboundId});
+                this.snapshotModal.loading = false;
+                if (m.success) this.snapshotModal.rows = m.obj || [];
+                else this.$message.error(m.msg);
+            }
+        },
+        mounted() {
+            this.load();
+        }
+    });
+</script>
+</body>
+</html>

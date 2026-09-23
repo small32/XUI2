@@ -1,0 +1,14 @@
+[Unit]
+Description=x-ui Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/x-ui/
+EnvironmentFile=/etc/x-ui/role.env
+EnvironmentFile=-/etc/x-ui/agent.env
+ExecStart=/usr/local/x-ui/x-ui
+
+[Install]
+WantedBy=multi-user.target

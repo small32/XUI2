@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+{{template "head" .}}
+<body>
+<a-layout id="app" v-cloak>
+{{template "commonSider" .}}
+<a-layout id="content-layout"><a-layout-content>
+<a-card title="被控端管理">
+<a-alert type="info" show-icon style="margin-bottom:16px" message="管理端通过 HTTPS Web API 同步账号并读取流量。被控端令牌只在这里填写，保存后不再回显。"></a-alert>
+<a-table :data-source="nodes" row-key="id" :pagination="false" size="small">
+<a-table-column title="名称" data-index="name"></a-table-column>
+<a-table-column title="API 地址" data-index="url"></a-table-column>
+<a-table-column title="订阅地址" data-index="address"></a-table-column>
+<a-table-column title="状态"><template slot-scope="text,row"><a-tag :color="row.enabled?'green':'orange'">[[row.enabled?'启用':'停用']]</a-tag></template></a-table-column>
+<a-table-column title="最近连接"><template slot-scope="text,row">[[row.lastSeen?new Date(row.lastSeen*1000).toLocaleString():'尚未连接']]</template></a-table-column>
+<a-table-column title="错误"><template slot-scope="text,row">[[row.lastError||'-']]</template></a-table-column>
+<a-table-column title="操作"><template slot-scope="text,row"><a-button type="link" @click="edit(row)">编辑</a-button><a-popconfirm title="将先删除该被控端上的受管账号，再移除节点。连接失败时不会移除，确定继续吗？" @confirm="remove(row)"><a-button type="link">删除</a-button></a-popconfirm></template></a-table-column>
+</a-table>
+<a-divider>[[node.id?'编辑被控端':'添加被控端']]</a-divider>
+<a-form layout="vertical">
+<a-form-item label="节点名称"><a-input v-model.trim="node.name" placeholder="用于订阅节点名称"></a-input></a-form-item>
+<a-form-item label="API 地址"><a-input v-model.trim="node.url" placeholder="https://node.example.com:54321"></a-input></a-form-item>
+<a-form-item label="订阅地址"><a-input v-model.trim="node.address" placeholder="node.example.com"></a-input></a-form-item>
+<a-form-item label="被控端 API 令牌"><a-input-password v-model="node.token" placeholder="编辑时留空则保留原令牌"></a-input-password></a-form-item>
+<a-form-item label="证书 SHA256 指纹（自签名证书时填写）"><a-input v-model.trim="node.certSha256" placeholder="64 位十六进制；公开可信证书可留空"></a-input></a-form-item>
+<a-form-item label="启用"><a-switch v-model="node.enabled"></a-switch></a-form-item>
+<a-button type="primary" :loading="loading" @click="saveNode">保存被控端</a-button><a-button style="margin-left:8px" @click="resetForm">清空</a-button>
+</a-form>
+<a-divider>管理端设置</a-divider>
+<a-form layout="vertical">
+<a-form-item label="超限自动禁用"><a-switch v-model="setting.autoDisable"></a-switch><span style="margin-left:8px">汇总所有被控端流量后，达到限额则停用全部节点</span></a-form-item>
+<a-form-item label="心跳间隔（分钟）"><a-input-number v-model="setting.heartbeatMinutes" :min="10"></a-input-number></a-form-item>
+<a-button @click="saveSetting">保存设置</a-button><a-button style="margin-left:8px" :loading="loading" @click="refreshTraffic">立即读取流量</a-button>
+</a-form>
+<a-divider>待同步任务</a-divider>
+<a-alert v-if="tasks.length" type="warning" show-icon :message="'有 '+tasks.length+' 项操作等待重试；管理端会在下一次心跳自动重试。'" style="margin-bottom:12px"></a-alert>
+<a-table :data-source="tasks" row-key="id" size="small" :pagination="{pageSize:10}">
+<a-table-column title="节点 ID" data-index="nodeId"></a-table-column><a-table-column title="端口" data-index="port"></a-table-column><a-table-column title="操作" data-index="kind"></a-table-column><a-table-column title="重试次数" data-index="attempts"></a-table-column><a-table-column title="最近错误" data-index="error"></a-table-column>
+</a-table>
+</a-card></a-layout-content></a-layout>
+</a-layout>
+{{template "js" .}}
+<script>
+const emptyNode=()=>({id:0,name:'',url:'',address:'',token:'',certSha256:'',enabled:true});
+new Vue({delimiters:['[[',']]'],el:'#app',data:{siderDrawer,loading:false,nodes:[],tasks:[],node:emptyNode(),setting:{autoDisable:true,heartbeatMinutes:10}},methods:{
+ async load(){let [nodes,tasks,setting]=await Promise.all([HttpUtil.post('/xui/server/nodes'),HttpUtil.post('/xui/server/tasks'),HttpUtil.post('/xui/server/setting/all')]);if(nodes.success)this.nodes=nodes.obj||[];if(tasks.success)this.tasks=tasks.obj||[];if(setting.success)this.setting=setting.obj;},
+ edit(row){this.node={id:row.id,name:row.name,url:row.url,address:row.address,token:'',certSha256:row.certSha256||'',enabled:row.enabled};},
+ resetForm(){this.node=emptyNode();},
+ async saveNode(){this.loading=true;let m=await HttpUtil.post('/xui/server/nodes/save',this.node);this.loading=false;if(m.success){this.$message.success('已保存');this.resetForm();this.load();}else this.$message.error(m.msg);},
+ async remove(row){let m=await HttpUtil.post('/xui/server/nodes/delete/'+row.id);if(m.success){this.$message.success('已删除');this.load();}else this.$message.error(m.msg);},
+ async saveSetting(){let m=await HttpUtil.post('/xui/server/setting',this.setting);if(m.success)this.$message.success('已保存');else this.$message.error(m.msg);},
+ async refreshTraffic(){this.loading=true;let m=await HttpUtil.post('/xui/server/traffic');this.loading=false;if(m.success)this.$message.success('流量已更新');else this.$message.error(m.msg);this.load();}
+},mounted(){this.load();}});
+</script>
+</body></html>
