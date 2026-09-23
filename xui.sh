@@ -434,10 +434,9 @@ ssl_cert_issue() {
                 exit 1
             fi
         fi
+        # 不再清空 /root/cert：新证书由 --installcert 直接覆盖旧文件，
+        # 避免签发失败时目录被清空、面板失去可用证书。
         if [ ! -d "$certPath" ]; then
-            mkdir -p "$certPath"
-        else
-            rm -rf "$certPath"
             mkdir -p "$certPath"
         fi
         LOGD "请设置域名:"
@@ -469,9 +468,11 @@ ssl_cert_issue() {
         else
             LOGI "证书签发成功,安装中..."
         fi
+        # --reloadcmd：acme.sh 每次安装/续签证书后自动执行，重启面板以加载新证书。
         if ! "$acme_sh" --installcert -d "${CF_Domain}" --ca-file "${certPath}/ca.cer" \
             --cert-file "${certPath}/${CF_Domain}.cer" --key-file "${certPath}/${CF_Domain}.key" \
-            --fullchain-file "${certPath}/fullchain.cer"; then
+            --fullchain-file "${certPath}/fullchain.cer" \
+            --reloadcmd "systemctl restart xui"; then
             LOGE "证书安装失败,脚本退出"
             exit 1
         else
@@ -482,14 +483,55 @@ ssl_cert_issue() {
             chmod 755 "$certPath"
             exit 1
         fi
-        # 注册 acme.sh 原生自动续期定时任务：acme.sh 将定期检查并在证书到期前自动重签。
-        # 该步骤失败不影响已签发的证书，仅提示并继续。
-        if ! "$acme_sh" install-cronjob 2>/dev/null; then
-            LOGE "自动续期定时任务注册失败(证书已签发,可稍后手动执行 $acme_sh install-cronjob)"
+        # 取消 acme.sh 自带的定时任务：续期改由下面的 systemd timer 调度，
+        # 不再让 acme.sh 往 root 的 crontab 里写任务。
+        "$acme_sh" --uninstall-cronjob >/dev/null 2>&1
+        # 续期调度：每天检查一次，只有剩余有效期不足 7 天才触发重签；
+        # 重签完成后 acme.sh 执行 --reloadcmd 自动重启面板，使新证书生效。
+        cat > /etc/xui/renew-cert.sh <<'RENEW_EOF'
+#!/bin/bash
+#
+# 面板证书续期检查，由 xui-ssl.timer 每天调用一次。
+# 只有剩余有效期不足 7 天时才触发重签：acme.sh 自身的默认阈值是剩余不足 60 天
+# （约到期前 30 天），直接执行 --cron 会提前约一个月就重签。
+set -u
+# 面板固定以 root 运行，这里不依赖 $HOME：systemd 服务不保证设置 HOME 变量。
+cert="/root/cert/fullchain.cer"
+acme_home="/root/.acme.sh"
+acme_sh="$acme_home/acme.sh"
+[ -f "$cert" ] || exit 0
+[ -x "$acme_sh" ] || exit 0
+# -checkend 604800 秒即 7 天：证书尚未进入 7 天窗口时直接退出。
+openssl x509 -in "$cert" -noout -checkend 604800 && exit 0
+"$acme_sh" --cron --home "$acme_home"
+RENEW_EOF
+        chmod 700 /etc/xui/renew-cert.sh
+        cat > /etc/systemd/system/xui-ssl.service <<'SERVICE_EOF'
+[Unit]
+Description=Renew panel TLS certificate with acme.sh
+
+[Service]
+Type=oneshot
+ExecStart=/etc/xui/renew-cert.sh
+SERVICE_EOF
+        cat > /etc/systemd/system/xui-ssl.timer <<'TIMER_EOF'
+[Unit]
+Description=Daily panel TLS certificate renewal check
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+TIMER_EOF
+        systemctl daemon-reload
+        if systemctl enable --now xui-ssl.timer 2>/dev/null; then
+            LOGI "已启用续期定时器 xui-ssl.timer(每天检查,剩余不足7天自动重签并重启面板)"
         else
-            LOGI "已注册 acme.sh 自动续期定时任务(到期前自动重签)"
+            LOGE "续期定时器启用失败(证书已签发,可稍后手动执行 systemctl enable --now xui-ssl.timer)"
         fi
-        LOGI "证书已安装并已开启自动更新"
+        LOGI "证书已安装并已开启自动续期"
         ls -lah "$certPath"
         chmod 755 "$certPath"
     else

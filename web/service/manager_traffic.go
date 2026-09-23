@@ -45,7 +45,7 @@ func (s *ServerManagementService) ListNodes() ([]entity.NodeRow, error) {
 		var agg struct {
 			Cnt   int   `gorm:"column:cnt"`
 			Used  int64 `gorm:"column:used"`
-			OnCnt int   `gorm:"column:onCnt"`
+			OnCnt int   `gorm:"column:on_cnt"`
 		}
 		err := database.GetDB().Model(&model.NodeTraffic{}).
 			Where("node_id = ?", n.Id).

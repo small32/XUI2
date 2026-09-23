@@ -1,47 +1,42 @@
 {{define "qrcodeModal"}}
 <a-modal id="qrcode-modal" v-model="qrModal.visible" :title="qrModal.title"
-         :closable="true" width="300px" :ok-text="qrModal.okText"
-         cancel-text='{{ call $.i18n "close" }}' :ok-button-props="{attrs:{id:'qr-modal-ok-btn'}}">
-    <canvas id="qrCode" style="width: 100%; height: 100%;"></canvas>
+         :closable="true" width="340px" :footer="null">
+    <div v-for="(item, index) in qrModal.items" :key="index" style="text-align:center;margin-bottom:20px">
+        <p v-if="item.name" style="margin-bottom:8px;font-weight:600">[[ item.name ]]</p>
+        <canvas :id="'qrCode-' + index" style="width: 100%; height: 100%;"></canvas>
+        <p style="margin-top:8px;word-break:break-all;font-size:12px">[[ item.content ]]</p>
+        <a-button size="small" style="margin-top:8px" @click="qrModal.copy(item)">{{ call $.i18n "copy" }}</a-button>
+    </div>
 </a-modal>
 
 <script>
 
     const qrModal = {
         title: '',
-        content: '',
-        okText: '',
-        copyText: '',
-        qrcode: null,
-        clipboard: null,
+        items: [],
+        qrcodes: [],
         visible: false,
-        show: function (title='', content='', okText='{{ call $.i18n "copy" }}', copyText='') {
+        // 每台被控端一个二维码：items 为 [{name, content}]，按节点名标注。
+        // 链接地址来自各被控端自己的订阅地址，不再使用管理端自身地址。
+        show: function (title = '', items = []) {
             this.title = title;
-            this.content = content;
-            this.okText = okText;
-            if (ObjectUtil.isEmpty(copyText)) {
-                this.copyText = content;
-            } else {
-                this.copyText = copyText;
-            }
+            this.items = items;
             this.visible = true;
             qrModalApp.$nextTick(() => {
-                if (this.clipboard === null) {
-                    this.clipboard = new ClipboardJS('#qr-modal-ok-btn', {
-                        text: () => this.copyText,
-                    });
-                    this.clipboard.on('success', () => app.$message.success('{{ call $.i18n "copied" }}'));
-                }
-                if (this.qrcode === null) {
-                    this.qrcode = new QRious({
-                        element: document.querySelector('#qrCode'),
-                        size: 260,
-                        value: content,
-                    });
-                } else {
-                    this.qrcode.value = content;
-                }
+                this.qrcodes = this.items.map((item, index) => new QRious({
+                    element: document.querySelector('#qrCode-' + index),
+                    size: 260,
+                    value: item.content,
+                }));
             });
+        },
+        copy: async function (item) {
+            try {
+                await navigator.clipboard.writeText(item.content);
+                app.$message.success('{{ call $.i18n "copied" }}');
+            } catch (e) {
+                app.$message.error('复制失败，请手动复制链接');
+            }
         },
         close: function () {
             this.visible = false;
@@ -49,6 +44,7 @@
     };
 
     const qrModalApp = new Vue({
+        delimiters: ['[[', ']]'],
         el: '#qrcode-modal',
         data: {
             qrModal: qrModal,

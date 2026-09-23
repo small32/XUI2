@@ -122,6 +122,20 @@ func inboundRevision(in *model.Inbound) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// hostOnlyAddress 去掉订阅地址里的端口：客户端连接用的端口由各入站自己决定，
+// 生成链接时会另拼 ":入站端口"，地址带端口会拼成 host:port:port 这类非法地址。
+func hostOnlyAddress(address string) string {
+	address = strings.TrimSpace(address)
+	i := strings.LastIndex(address, ":")
+	if i <= 0 || strings.Contains(address[:i], ":") {
+		return address
+	}
+	if _, err := strconv.Atoi(address[i+1:]); err != nil {
+		return address
+	}
+	return address[:i]
+}
+
 func (s *ServerManagementService) Nodes() ([]model.ManagedNode, error) {
 	var nodes []model.ManagedNode
 	err := database.GetDB().Order("id").Find(&nodes).Error
@@ -157,7 +171,7 @@ func (s *ServerManagementService) SaveNode(input NodeInput) error {
 		return errors.New("API 令牌至少 32 字符")
 	}
 	oldURL, oldPin, oldEnabled := node.URL, node.CertSHA256, node.Enabled
-	node.Name, node.URL, node.Address, node.CertSHA256, node.Enabled = strings.TrimSpace(input.Name), strings.TrimRight(u.String(), "/"), strings.TrimSpace(input.Address), pin, input.Enabled
+	node.Name, node.URL, node.Address, node.CertSHA256, node.Enabled = strings.TrimSpace(input.Name), strings.TrimRight(u.String(), "/"), hostOnlyAddress(input.Address), pin, input.Enabled
 	if node.Enabled {
 		var capability struct {
 			APIVersion int `json:"apiVersion"`

@@ -11,7 +11,6 @@
         visible: false,
         inbound: new Inbound(),
         dbInbound: new DBInbound(),
-        clipboard: null,
         okBtnPros: {
             attrs: {
                 id: "inbound-info-modal-ok-btn",
@@ -28,15 +27,31 @@
             } else {
                 this.okBtnPros.attrs.style = "display: none";
             }
-
-            if (this.clipboard == null) {
-                infoModalApp.$nextTick(() => {
-                    this.clipboard = new ClipboardJS(`#${this.okBtnPros.attrs.id}`, {
-                        text: () => this.dbInbound.genLink(),
-                    });
-                    this.clipboard.on('success', () => app.$message.success('复制成功'));
-                });
+        },
+        async ok() {
+            const text = await this.linkText();
+            if (!text) {
+                app.$message.error('无法生成当前入站的节点链接');
+                return;
             }
+            try {
+                await navigator.clipboard.writeText(text);
+                app.$message.success('{{ call $.i18n "copied" }}');
+            } catch (e) {
+                app.$message.error('复制失败，请手动复制链接');
+            }
+        },
+        // 管理端有多台被控端时复制全部节点的链接，每行一条，地址取各被控端自己的订阅地址；
+        // 被控端自身面板仍复制本机链接。
+        async linkText() {
+            if (role !== 'manager') {
+                return this.dbInbound.genLink();
+            }
+            const remoteObjects = await app.loadRemoteInbounds(this.dbInbound);
+            if (!remoteObjects) return '';
+            const links = app.nodeLinks(remoteObjects);
+            if (!links) return '';
+            return links.map(item => item.content).join('\n');
         },
         close() {
             infoModal.visible = false;

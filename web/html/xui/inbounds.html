@@ -377,9 +377,50 @@
                     onOk: () => this.submit('/xui/inbound/del/' + dbInbound.id),
                 });
             },
-            showQrcode(dbInbound) {
-                const link = dbInbound.genLink();
-                qrModal.show('二维码', link);
+            async loadRemoteInbounds(dbInbound) {
+                // 生成二维码和订阅都要逐台被控端取数：受限登录走只读订阅接口，
+                // 管理员走被控端管理接口，两者都返回每台已启用被控端的一条记录。
+                if (restricted) {
+                    const sub = await HttpUtil.post('/xui/inbound/subscription');
+                    if (!sub.success) { this.$message.error(sub.msg || '读取订阅数据失败'); return null; }
+                    return (sub.obj && sub.obj.remoteInbounds) || [];
+                }
+                const remote = await HttpUtil.post('/xui/server/inbound/' + dbInbound.port);
+                if (!remote.success) { this.$message.error(remote.msg || '读取远程节点失败'); return null; }
+                return remote.obj || [];
+            },
+            nodeLinks(remoteObjects) {
+                // 每台被控端一条链接，地址取该被控端自己的订阅地址，而不是管理端地址。
+                const links = [];
+                for (const remoteObj of remoteObjects) {
+                    const remoteInbound = new DBInbound(remoteObj);
+                    let remoteAddress = (remoteInbound.remoteAddress || '').trim();
+                    // 订阅地址只取主机名：客户端端口由入站自己决定，genLink 会另拼 :端口。
+                    const hostOnly = /^([^:]+):[0-9]+$/.exec(remoteAddress);
+                    if (hostOnly) remoteAddress = hostOnly[1];
+                    if (!remoteAddress) {
+                        this.$message.error('被控端订阅地址为空，请检查被控端设置');
+                        return null;
+                    }
+                    const remoteName = (remoteObj.remoteName || '').trim();
+                    if (!remoteName) { this.$message.error('请在被控端管理中设置节点名称'); return null; }
+                    const remoteLink = remoteInbound.genLink(remoteAddress, remoteName);
+                    if (remoteLink) links.push({ name: remoteName, content: remoteLink });
+                }
+                if (!links.length) { this.$message.error('无法生成当前入站的节点链接'); return null; }
+                return links;
+            },
+            async showQrcode(dbInbound) {
+                if (!dbInbound.hasLink()) return;
+                if (role !== 'manager') {
+                    qrModal.show('二维码', [{ name: '', content: dbInbound.genLink() }]);
+                    return;
+                }
+                const remoteObjects = await this.loadRemoteInbounds(dbInbound);
+                if (!remoteObjects) return;
+                const links = this.nodeLinks(remoteObjects);
+                if (!links) return;
+                qrModal.show('二维码', links);
             },
             updateSubscriptionUrl() {
                 this.clashSubscriptionUrl = 'https://api.wcc.best/sub?target=' + this.subscriptionTarget
@@ -391,39 +432,11 @@
             },
             async showClashSubscription(dbInbound) {
                 if (!dbInbound.hasLink()) return;
-                let remoteObjects = [];
-                if (restricted) {
-                    // 受限登录：走只读订阅接口，避免暴露面板设置与服务器管理接口
-                    const sub = await HttpUtil.post('/xui/inbound/subscription');
-                    if (!sub.success) { this.$message.error(sub.msg || '读取订阅数据失败'); return; }
-                    remoteObjects = (sub.obj && sub.obj.remoteInbounds) || [];
-                } else {
-                    const remote = await HttpUtil.post('/xui/server/inbound/' + dbInbound.port);
-                    if (!remote.success) {
-                        this.$message.error(remote.msg || '读取远程节点失败');
-                        return;
-                    }
-                    remoteObjects = remote.obj || [];
-                }
-                let links = [];
-                for (const remoteObj of remoteObjects) {
-                    const remoteInbound = new DBInbound(remoteObj);
-                    const remoteAddress = remoteInbound.remoteAddress;
-                    if (!remoteAddress) {
-                        this.$message.error('被控端订阅地址为空，请检查被控端设置');
-                        return;
-                    }
-                    const remoteName = (remoteObj.remoteName || '').trim();
-                    if (!remoteName) { this.$message.error('请在被控端管理中设置节点名称'); return; }
-                    const remoteLink = remoteInbound.genLink(remoteAddress, remoteName);
-                    if (remoteLink) links.push(remoteLink);
-                }
-                const link = links.join('|');
-                if (!link) {
-                    this.$message.error('无法生成当前入站的节点链接');
-                    return;
-                }
-                this.subscriptionNodes = link;
+                const remoteObjects = await this.loadRemoteInbounds(dbInbound);
+                if (!remoteObjects) return;
+                const links = this.nodeLinks(remoteObjects);
+                if (!links) return;
+                this.subscriptionNodes = links.map(item => item.content).join('|');
                 this.updateSubscriptionUrl();
                 this.clashSubscriptionVisible = true;
                 this.$nextTick(() => {

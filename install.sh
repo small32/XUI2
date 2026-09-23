@@ -170,8 +170,12 @@ configure_role() {
     if [[ "$XUI_ROLE" != agent ]]; then return 0; fi
     echo "被控端 API 令牌（请复制到管理端，仅管理员可见）："
     sed -n 's/^XUI_AGENT_TOKEN=//p' /etc/xui/agent.env
+    # 指纹必须取自面板实际生效的证书：面板启动时优先采用 /root/cert 下由一键申请
+    # 生成的可信证书，只有在它不存在时才退回 /etc/xui 的自签证书。
+    effective_cert="/root/cert/fullchain.cer"
+    [[ -f "$effective_cert" ]] || effective_cert="/etc/xui/panel.crt"
     echo "证书 SHA256 指纹（填入管理端）："
-    openssl x509 -in /etc/xui/panel.crt -outform DER | sha256sum | awk '{print $1}'
+    openssl x509 -in "$effective_cert" -outform DER | sha256sum | awk '{print $1}'
 }
 
 #This function will be called when user installed xui out of sercurity

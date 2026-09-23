@@ -307,20 +307,9 @@ func (s *Server) Start() (err error) {
 		return err
 	}
 
-	certFile, err := s.settingService.GetCertFile()
+	certFile, keyFile, err := s.resolvePanelCert()
 	if err != nil {
 		return err
-	}
-	keyFile, err := s.settingService.GetKeyFile()
-	if err != nil {
-		return err
-	}
-	// 未显式配置面板证书时，自动发现 /root/cert 下的证书（通常由 xui 一键申请 SSL 生成）。
-	if certFile == "" || keyFile == "" {
-		if discoveredCert, discoveredKey := discoverRootCert(); discoveredCert != "" && discoveredKey != "" {
-			certFile, keyFile = discoveredCert, discoveredKey
-			logger.Info("auto-using cert from /root/cert: ", certFile, " / ", keyFile)
-		}
 	}
 	listen, err := s.settingService.GetListen()
 	if err != nil {
@@ -366,6 +355,53 @@ func (s *Server) Start() (err error) {
 	}()
 
 	return nil
+}
+
+// 安装脚本生成的兜底自签证书位置：/root/cert 下没有可用证书时用它。
+const (
+	selfSignedCert = "/etc/xui/panel.crt"
+	selfSignedKey  = "/etc/xui/panel.key"
+)
+
+// resolvePanelCert 每次启动重新识别一次面板证书：
+// 1) 优先 /root/cert 下由一键申请生成的可信证书，识别到就回填设置，
+//    设置页据此显示实际生效的路径；
+// 2) 识别不到时沿用设置中的证书，通常是安装脚本生成的自签证书；
+// 3) 设置中的路径已不可用（例如证书被删）时退回自签证书，避免面板起不来。
+func (s *Server) resolvePanelCert() (string, string, error) {
+	if certFile, keyFile := discoverRootCert(); canUseCertPair(certFile, keyFile) {
+		logger.Info("auto-using cert from /root/cert: ", certFile, " / ", keyFile)
+		if err := s.settingService.SetCertFiles(certFile, keyFile); err != nil {
+			logger.Warning("回填面板证书设置失败: ", err)
+		}
+		return certFile, keyFile, nil
+	}
+	certFile, err := s.settingService.GetCertFile()
+	if err != nil {
+		return "", "", err
+	}
+	keyFile, err := s.settingService.GetKeyFile()
+	if err != nil {
+		return "", "", err
+	}
+	if certFile == "" || keyFile == "" || canUseCertPair(certFile, keyFile) {
+		return certFile, keyFile, nil
+	}
+	if canUseCertPair(selfSignedCert, selfSignedKey) {
+		logger.Warning("面板证书不可用，改用自签证书: ", selfSignedCert, " / ", selfSignedKey)
+		return selfSignedCert, selfSignedKey, nil
+	}
+	// 两处都不可用：返回原路径，由调用方报出确切错误，不静默退化成 HTTP。
+	return certFile, keyFile, nil
+}
+
+// canUseCertPair 判断证书与私钥是否齐备且能被加载。
+func canUseCertPair(certFile, keyFile string) bool {
+	if certFile == "" || keyFile == "" {
+		return false
+	}
+	_, err := tls.LoadX509KeyPair(certFile, keyFile)
+	return err == nil
 }
 
 // discoverRootCert 扫描 /root/cert 目录，尝试为面板找到一对证书与私钥。
