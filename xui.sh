@@ -384,7 +384,10 @@ show_status() {
         echo -e "面板状态: ${red}未安装${plain}"
         ;;
     esac
-    show_xray_status
+    # 管理端不运行 xray 进程，状态区不显示 xray 状态；仅被控端显示。
+    if [[ "$(sed -n 's/^XUI_ROLE=//p' /etc/xui/role.env 2>/dev/null | head -1)" != "manager" ]]; then
+        show_xray_status
+    fi
 }
 
 show_enable_status() {
