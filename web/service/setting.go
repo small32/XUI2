@@ -304,13 +304,14 @@ func (s *SettingService) AgentConnectionInfo() (*entity.AgentConnectionInfo, err
 		}
 	}
 	host = strings.TrimSpace(host)
-	base := "https://" + host
+	// 订阅地址只保留主机名（不带 Web 端口）；API 地址仍需端口供管理端连接。
+	api := "https://" + host
 	if port != 0 {
-		base += ":" + strconv.Itoa(port)
+		api += ":" + strconv.Itoa(port)
 	}
 	info := &entity.AgentConnectionInfo{
-		ApiUrl:       base + "/api/v1",
-		SubscribeUrl: base,
+		ApiUrl:       api + "/api/v1",
+		SubscribeUrl: "https://" + host,
 		Port:         port,
 		Token:        os.Getenv("XUI_AGENT_TOKEN"),
 		CertSha256:   s.selfCertFingerprint(),
