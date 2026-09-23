@@ -477,18 +477,21 @@ ssl_cert_issue() {
         else
             LOGI "证书安装成功,开启自动更新..."
         fi
-        "$acme_sh" --upgrade --auto-upgrade
-        # 注册 acme.sh 原生自动续期定时任务：acme.sh 将定期检查并在证书到期前自动重签
-        "$acme_sh" install-cronjob 2>/dev/null
-        if [ $? -ne 0 ]; then
-            LOGE "自动更新设置失败,脚本退出"
+        if ! "$acme_sh" --upgrade --auto-upgrade 2>/dev/null; then
+            LOGE "自动更新(acme.sh --upgrade)设置失败,脚本退出"
             chmod 755 "$certPath"
             exit 1
-        else
-            LOGI "证书已安装并已开启自动更新与自动续期(acme.sh 将在到期前自动重签)"
-            ls -lah "$certPath"
-            chmod 755 "$certPath"
         fi
+        # 注册 acme.sh 原生自动续期定时任务：acme.sh 将定期检查并在证书到期前自动重签。
+        # 该步骤失败不影响已签发的证书，仅提示并继续。
+        if ! "$acme_sh" install-cronjob 2>/dev/null; then
+            LOGE "自动续期定时任务注册失败(证书已签发,可稍后手动执行 $acme_sh install-cronjob)"
+        else
+            LOGI "已注册 acme.sh 自动续期定时任务(到期前自动重签)"
+        fi
+        LOGI "证书已安装并已开启自动更新"
+        ls -lah "$certPath"
+        chmod 755 "$certPath"
     else
         show_menu
     fi
