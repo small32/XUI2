@@ -417,10 +417,17 @@ func discoverCertIn(dir string) (certFile, keyFile string) {
 	if err != nil {
 		return "", ""
 	}
-	// 1) 优先：fullchain.cer 配 fullchain.key
+	// 1) 优先：fullchain.cer 配 fullchain.key；key 缺省时取目录中第一个 *.key
+	//    （菜单 16 安装的私钥名为 <域名>.key），保证 TLS 与指纹展示同用这张完整链证书。
 	if c := filepath.Join(dir, "fullchain.cer"); fileExists(c) {
 		if k := filepath.Join(dir, "fullchain.key"); fileExists(k) {
 			return c, k
+		}
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".key") {
+				continue
+			}
+			return c, filepath.Join(dir, e.Name())
 		}
 	}
 	// 2) 同名配对的 .cer 与 .key：遍历目录条目
