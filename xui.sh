@@ -475,7 +475,7 @@ ssl_cert_issue() {
         fi
         # --reloadcmd：acme.sh 每次安装/续签证书后自动执行，重启面板以加载新证书。
         if ! "$acme_sh" --installcert -d "${CF_Domain}" --ca-file "${certPath}/ca.cer" \
-            --cert-file "${certPath}/${CF_Domain}.cer" --key-file "${certPath}/${CF_Domain}.key" \
+            --cert-file "${certPath}/${CF_Domain}.cer" --key-file "${certPath}/fullchain.key" \
             --fullchain-file "${certPath}/fullchain.cer" \
             --reloadcmd "systemctl restart xui"; then
             LOGE "证书安装失败,脚本退出"
