@@ -42,20 +42,28 @@ jobs:
       matrix:
         include:
           - arch: amd64
-            cc: gcc
-            package: gcc
+            musl_pkg: musl-tools
+            cc: x86_64-linux-musl-gcc
             xray: Xray-linux-64.zip
           - arch: arm64
-            cc: aarch64-linux-gnu-gcc
-            package: gcc-aarch64-linux-gnu
+            musl_url: https://musl.cc/aarch64-linux-musl-cross.tgz
+            cc: aarch64-linux-musl-gcc
             xray: Xray-linux-arm64-v8a.zip
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
-      - name: Install compiler
-        run: sudo apt-get update && sudo apt-get install -y ${{ matrix.package }}
+      - name: Install musl cross toolchain
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ matrix.musl_pkg }}" ]]; then
+            sudo apt-get update && sudo apt-get install -y ${{ matrix.musl_pkg }}
+          else
+            curl -fL --retry 3 "${{ matrix.musl_url }}" -o musl-cross.tgz
+            tar -xzf musl-cross.tgz
+            echo "$PWD/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
+          fi
       - name: Build and package
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
@@ -67,7 +75,7 @@ jobs:
           set -euo pipefail
           printf '%s\n' "$VERSION" > config/version
           mkdir -p dist/xui/bin
-          go build -trimpath -o dist/xui/xui main.go
+          go build -trimpath -ldflags '-linkmode external -extldflags "-static"' -o dist/xui/xui main.go
           cp xui.service xui.sh LICENSE dist/xui/
           curl -fL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/${{ matrix.xray }}" -o xray.zip
           unzip -j xray.zip xray -d dist/xui/bin
@@ -78,6 +86,15 @@ jobs:
           chmod +x dist/xui/xui dist/xui/xui.sh "dist/xui/bin/xray-linux-${GOARCH}"
           test -s dist/xui/bin/geoip.dat
           test -s dist/xui/bin/geosite.dat
+          # 确认面板为纯静态链接：不依赖宿主 glibc 版本，任意 Linux 均可运行
+          file dist/xui/xui
+          if ldd dist/xui/xui 2>&1 | grep -q 'not a dynamic executable'; then
+            echo "static link OK"
+          else
+            ldd dist/xui/xui 2>&1
+            echo "dynamic link detected"
+            exit 1
+          fi
           if [ "$GOARCH" = amd64 ]; then
             dist/xui/xui -v
             dist/xui/bin/xray-linux-amd64 version
