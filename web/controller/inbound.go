@@ -18,10 +18,11 @@ type InboundController struct {
 	xrayService    service.XrayService
 	serverService  service.ServerManagementService
 	settingService service.SettingService
+	server         *ServerManagementController
 }
 
-func NewInboundController(g *gin.RouterGroup) *InboundController {
-	a := &InboundController{}
+func NewInboundController(g *gin.RouterGroup, server *ServerManagementController) *InboundController {
+	a := &InboundController{server: server}
 	a.initRouter(g)
 	a.startTask()
 	return a
@@ -166,6 +167,7 @@ func (a *InboundController) addInbound(c *gin.Context) {
 	// The agent fills certificate paths from its own panel settings.
 	err = a.inboundService.AddInbound(inbound)
 	if err == nil {
+		a.server.heartbeatSoon()
 		if syncErr := a.serverService.SyncInbound(inbound, 0, true); syncErr != nil {
 			logger.Warning("被控端账号同步待重试: ", syncErr)
 			err = fmt.Errorf("管理端账号已创建，部分被控端同步失败并已进入重试队列: %w", syncErr)
@@ -194,6 +196,7 @@ func (a *InboundController) delInbound(c *gin.Context) {
 	}
 	err = a.inboundService.DelInbound(id)
 	if err == nil {
+		a.server.heartbeatSoon()
 		if config.Role() == "agent" {
 			a.xrayService.SetToNeedRestart()
 		}
@@ -249,6 +252,7 @@ func (a *InboundController) updateInbound(c *gin.Context) {
 	oldPort := old.Port
 	err = a.inboundService.UpdateInbound(inbound)
 	if err == nil {
+		a.server.heartbeatSoon()
 		if syncErr := a.serverService.SyncInbound(inbound, oldPort, false); syncErr != nil {
 			logger.Warning("被控端账号同步待重试: ", syncErr)
 			err = fmt.Errorf("管理端账号已修改，部分被控端同步失败并已进入重试队列: %w", syncErr)

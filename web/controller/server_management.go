@@ -18,9 +18,10 @@ const monthlyResetCronSpec = "1 0 0 1 * *"
 const monthlyResetFallbackSpec = "@every 5m"
 
 type ServerManagementController struct {
-	service       service.ServerManagementService
-	lastHeartbeat time.Time
-	heartbeatMu   sync.Mutex
+	service          service.ServerManagementService
+	lastHeartbeat    time.Time
+	heartbeatMu      sync.Mutex
+	heartbeatPending bool
 }
 
 func NewServerManagementController(g *gin.RouterGroup) *ServerManagementController {
@@ -45,30 +46,58 @@ func NewServerManagementController(g *gin.RouterGroup) *ServerManagementControll
 	cron := global.GetWebServer().GetCron()
 	cron.AddFunc(monthlyResetCronSpec, a.monthlyReset)
 	cron.AddFunc(monthlyResetFallbackSpec, a.monthlyReset)
-	cron.AddFunc("@every 1m", func() {
-		setting, err := a.service.GetSetting()
-		if err != nil {
-			logger.Warning("管理端设置读取失败: ", err)
-			return
-		}
-		a.heartbeatMu.Lock()
-		if !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < time.Duration(setting.HeartbeatMinutes)*time.Minute {
-			a.heartbeatMu.Unlock()
-			return
-		}
-		a.lastHeartbeat = time.Now()
-		a.heartbeatMu.Unlock()
-		if err := a.service.MaybeMonthlyReset(); err != nil {
-			logger.Warning("月度重置失败: ", err)
-		}
-		if err := a.service.DispatchPending(); err != nil {
-			logger.Warning("账号同步重试失败: ", err)
-		}
-		if _, err := a.service.Traffic(); err != nil {
-			logger.Warning("被控端流量读取失败: ", err)
-		}
-	})
+	cron.AddFunc("@every 1m", a.maybeHeartbeat)
 	return a
+}
+
+// maybeHeartbeat 周期心跳：距上次心跳不足 HeartbeatMinutes 分钟时跳过，
+// 否则执行月度重置、待重试同步与流量读取。
+func (a *ServerManagementController) maybeHeartbeat() {
+	setting, err := a.service.GetSetting()
+	if err != nil {
+		logger.Warning("管理端设置读取失败: ", err)
+		return
+	}
+	a.heartbeatMu.Lock()
+	if !a.lastHeartbeat.IsZero() && time.Since(a.lastHeartbeat) < time.Duration(setting.HeartbeatMinutes)*time.Minute {
+		a.heartbeatMu.Unlock()
+		return
+	}
+	a.lastHeartbeat = time.Now()
+	a.heartbeatMu.Unlock()
+	a.doHeartbeat()
+}
+
+// heartbeatSoon 入站增删改后 10 秒触发一次心跳，绕过心跳间隔限制，
+// 让被控端尽快收到变更；10 秒内的多次变更只安排一次。
+func (a *ServerManagementController) heartbeatSoon() {
+	a.heartbeatMu.Lock()
+	if a.heartbeatPending {
+		a.heartbeatMu.Unlock()
+		return
+	}
+	a.heartbeatPending = true
+	a.heartbeatMu.Unlock()
+	time.AfterFunc(10*time.Second, func() {
+		a.heartbeatMu.Lock()
+		a.lastHeartbeat = time.Now()
+		a.heartbeatPending = false
+		a.heartbeatMu.Unlock()
+		a.doHeartbeat()
+	})
+}
+
+// doHeartbeat 执行一次完整心跳：月度重置、待重试账号同步、被控端流量读取。
+func (a *ServerManagementController) doHeartbeat() {
+	if err := a.service.MaybeMonthlyReset(); err != nil {
+		logger.Warning("月度重置失败: ", err)
+	}
+	if err := a.service.DispatchPending(); err != nil {
+		logger.Warning("账号同步重试失败: ", err)
+	}
+	if _, err := a.service.Traffic(); err != nil {
+		logger.Warning("被控端流量读取失败: ", err)
+	}
 }
 func (a *ServerManagementController) page(c *gin.Context) {
 	html(c, "server.html", "被控端管理", nil)

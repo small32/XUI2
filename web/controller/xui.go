@@ -11,8 +11,9 @@ import (
 type XUIController struct {
 	BaseController
 
-	inboundController *InboundController
-	settingController *SettingController
+	inboundController           *InboundController
+	settingController           *SettingController
+	serverManagementController *ServerManagementController
 }
 
 func NewXUIController(g *gin.RouterGroup) *XUIController {
@@ -30,9 +31,9 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	g.GET("/inbounds", a.inbounds)
 	g.GET("/setting", a.setting)
 
-	a.inboundController = NewInboundController(g)
+	a.serverManagementController = NewServerManagementController(g)
+	a.inboundController = NewInboundController(g, a.serverManagementController)
 	a.settingController = NewSettingController(g)
-	NewServerManagementController(g)
 }
 
 // checkRestricted 受限登录（入站端口号登录）仅可访问入站列表页、入站列表数据、其订阅数据，
