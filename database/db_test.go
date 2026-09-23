@@ -7,13 +7,13 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"x-ui/database/model"
+	"xui/database/model"
 )
 
 // 老库升级：monthly_reset 是后加的列，升级时必须回填为“按月计算”，
 // 否则老客户会静默丢掉月度清零，流量一路累计到上限后永久停用。
 func TestInitInboundBackfillsMonthlyReset(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	dbPath := filepath.Join(t.TempDir(), "xui.db")
 
 	// 造一个升级前的老库（表里没有 monthly_reset 列）。
 	legacy, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
@@ -94,7 +94,7 @@ func TestInitInboundBackfillsMonthlyReset(t *testing.T) {
 
 // 全新安装：表还不存在时不该触发回填，新建的入站默认是累计计费（不按月清零）。
 func TestInitInboundFreshInstallDefaultsToCumulative(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "x-ui.db")
+	dbPath := filepath.Join(t.TempDir(), "xui.db")
 	if err := InitDB(dbPath); err != nil {
 		t.Fatal(err)
 	}

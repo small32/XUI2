@@ -5,10 +5,10 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"x-ui/config"
-	"x-ui/logger"
-	"x-ui/web/service"
-	"x-ui/web/session"
+	"xui/config"
+	"xui/logger"
+	"xui/web/service"
+	"xui/web/session"
 
 	"github.com/gin-gonic/gin"
 )

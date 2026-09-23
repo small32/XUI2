@@ -4,13 +4,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"x-ui/database"
+	"xui/database"
 )
 
 // 锁定密码哈希化行为：新写入的密码必须以 bcrypt 形式存储（不再明文），
 // 登录时能正确校验，且 VerifyPassword 兼容历史明文。
 func TestPasswordHashing(t *testing.T) {
-	if err := database.InitDB(filepath.Join(t.TempDir(), "x-ui.db")); err != nil {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
 	us := &UserService{}

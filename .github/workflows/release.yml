@@ -64,28 +64,28 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s\n' "$VERSION" > config/version
-          mkdir -p dist/x-ui/bin
-          go build -trimpath -o dist/x-ui/x-ui main.go
-          cp x-ui.service x-ui.sh LICENSE dist/x-ui/
+          mkdir -p dist/xui/bin
+          go build -trimpath -o dist/xui/xui main.go
+          cp xui.service xui.sh LICENSE dist/xui/
           curl -fL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/${{ matrix.xray }}" -o xray.zip
-          unzip -j xray.zip xray -d dist/x-ui/bin
-          mv dist/x-ui/bin/xray "dist/x-ui/bin/xray-linux-${GOARCH}"
+          unzip -j xray.zip xray -d dist/xui/bin
+          mv dist/xui/bin/xray "dist/xui/bin/xray-linux-${GOARCH}"
           for file in geoip.dat geosite.dat; do
-            curl -fL --retry 3 "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/$file" -o "dist/x-ui/bin/$file"
+            curl -fL --retry 3 "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/$file" -o "dist/xui/bin/$file"
           done
-          chmod +x dist/x-ui/x-ui dist/x-ui/x-ui.sh "dist/x-ui/bin/xray-linux-${GOARCH}"
-          test -s dist/x-ui/bin/geoip.dat
-          test -s dist/x-ui/bin/geosite.dat
+          chmod +x dist/xui/xui dist/xui/xui.sh "dist/xui/bin/xray-linux-${GOARCH}"
+          test -s dist/xui/bin/geoip.dat
+          test -s dist/xui/bin/geosite.dat
           if [ "$GOARCH" = amd64 ]; then
-            dist/x-ui/x-ui -v
-            dist/x-ui/bin/xray-linux-amd64 version
+            dist/xui/xui -v
+            dist/xui/bin/xray-linux-amd64 version
           fi
-          tar -C dist -czf "x-ui-linux-${GOARCH}.tar.gz" x-ui
-          tar -tzf "x-ui-linux-${GOARCH}.tar.gz"
+          tar -C dist -czf "xui-linux-${GOARCH}.tar.gz" xui
+          tar -tzf "xui-linux-${GOARCH}.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
-          name: x-ui-linux-${{ matrix.arch }}
-          path: x-ui-linux-${{ matrix.arch }}.tar.gz
+          name: xui-linux-${{ matrix.arch }}
+          path: xui-linux-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   publish:
@@ -96,7 +96,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: x-ui-linux-*
+          pattern: xui-linux-*
           merge-multiple: true
           path: release
       - name: Publish complete release
@@ -109,13 +109,13 @@ jobs:
         run: |
           set -euo pipefail
           for arch in amd64 arm64; do
-            test -s "x-ui-linux-${arch}.tar.gz"
+            test -s "xui-linux-${arch}.tar.gz"
           done
-          sha256sum x-ui-linux-*.tar.gz > SHA256SUMS
+          sha256sum xui-linux-*.tar.gz > SHA256SUMS
           printf '%s\n' \
             'XUI2 将面板分为管理端与被控端，安装时选择角色。' \
             '管理端通过 HTTPS Web API 向多台被控端同步账号，汇总流量并执行共享限额。' \
             '被控端保存本机月度流量快照；失败同步与 Xray 重载可重试。' \
             '安装包支持 Linux amd64 和 arm64，包含 Xray-core v26.3.27。' > notes.md
-          gh release create "$VERSION" --target "$COMMIT" --title "XUI2 $VERSION" --notes-file notes.md --draft x-ui-linux-*.tar.gz SHA256SUMS
+          gh release create "$VERSION" --target "$COMMIT" --title "XUI2 $VERSION" --notes-file notes.md --draft xui-linux-*.tar.gz SHA256SUMS
           gh release edit "$VERSION" --draft=false --prerelease=false --latest

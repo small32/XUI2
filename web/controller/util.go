@@ -5,11 +5,11 @@ import (
 	"github.com/nicksnyder/go-i18n/v2/i18n"
 	"net"
 	"net/http"
-	"x-ui/config"
-	"x-ui/logger"
-	"x-ui/util/common"
-	"x-ui/web/entity"
-	"x-ui/web/session"
+	"xui/config"
+	"xui/logger"
+	"xui/util/common"
+	"xui/web/entity"
+	"xui/web/session"
 )
 
 func getUriId(c *gin.Context) int64 {

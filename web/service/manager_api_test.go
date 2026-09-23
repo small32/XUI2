@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"x-ui/database"
-	"x-ui/database/model"
-	"x-ui/util/common"
+	"xui/database"
+	"xui/database/model"
+	"xui/util/common"
 )
 
 func TestManagerSyncAndSharedLimit(t *testing.T) {

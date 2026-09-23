@@ -10,9 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"x-ui/database"
-	"x-ui/database/model"
-	"x-ui/web/service"
+	"xui/database"
+	"xui/database/model"
+	"xui/web/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

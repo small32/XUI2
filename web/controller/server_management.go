@@ -4,12 +4,12 @@ import (
 	"strconv"
 	"sync"
 	"time"
-	"x-ui/config"
-	"x-ui/logger"
-	"x-ui/web/entity"
-	"x-ui/web/global"
-	"x-ui/web/service"
-	"x-ui/web/session"
+	"xui/config"
+	"xui/logger"
+	"xui/web/entity"
+	"xui/web/global"
+	"xui/web/service"
+	"xui/web/session"
 
 	"github.com/gin-gonic/gin"
 )

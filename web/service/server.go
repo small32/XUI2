@@ -20,9 +20,9 @@ import (
 	"runtime"
 	"strings"
 	"time"
-	"x-ui/logger"
-	"x-ui/util/sys"
-	"x-ui/xray"
+	"xui/logger"
+	"xui/util/sys"
+	"xui/xray"
 )
 
 type ProcessState string

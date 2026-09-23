@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"x-ui/web/session"
+	"xui/web/session"
 )
 
 type XUIController struct {

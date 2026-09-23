@@ -14,13 +14,13 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"x-ui/config"
-	"x-ui/logger"
-	"x-ui/util/common"
-	"x-ui/web/controller"
-	"x-ui/web/job"
-	"x-ui/web/network"
-	"x-ui/web/service"
+	"xui/config"
+	"xui/logger"
+	"xui/util/common"
+	"xui/web/controller"
+	"xui/web/job"
+	"xui/web/network"
+	"xui/web/service"
 
 	"github.com/BurntSushi/toml"
 	"github.com/gin-contrib/sessions"
@@ -218,7 +218,7 @@ func newSessionStore(secret []byte) sessions.Store {
 	// Cookie store accepts an authentication key and an optional encryption key.
 	// Derive a distinct 256-bit encryption key so session values (including the
 	// password-change fingerprint) are not readable from a signed cookie.
-	encryptionKey := sha256.Sum256(append([]byte("x-ui/session-encryption/"), secret...))
+	encryptionKey := sha256.Sum256(append([]byte("xui/session-encryption/"), secret...))
 	store := cookie.NewStore(secret, encryptionKey[:])
 	store.Options(sessions.Options{
 		Path:     "/",

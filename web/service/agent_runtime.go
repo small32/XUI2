@@ -2,8 +2,8 @@ package service
 
 import (
 	"errors"
-	"x-ui/database"
-	"x-ui/database/model"
+	"xui/database"
+	"xui/database/model"
 
 	"gorm.io/gorm"
 )

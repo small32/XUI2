@@ -10,7 +10,7 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 
-	"x-ui/web/session"
+	"xui/web/session"
 )
 
 // 受限登录要能打开流量汇总页里的快照入口，同时其余路径仍被拦截。

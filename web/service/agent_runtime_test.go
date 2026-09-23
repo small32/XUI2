@@ -4,8 +4,8 @@ import (
  "errors"
  "path/filepath"
  "testing"
- "x-ui/database"
- "x-ui/database/model"
+ "xui/database"
+ "xui/database/model"
 )
 
 func TestAgentReloadFailureRemainsRetryable(t *testing.T) {

@@ -3,7 +3,7 @@ package service
 import (
 	"strings"
 	"testing"
-	"x-ui/database/model"
+	"xui/database/model"
 )
 
 func TestLoginPasswordSnapshot(t *testing.T) {

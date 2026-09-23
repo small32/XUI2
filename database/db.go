@@ -11,8 +11,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
-	"x-ui/config"
-	"x-ui/database/model"
+	"xui/config"
+	"xui/database/model"
 )
 
 var db *gorm.DB

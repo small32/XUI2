@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
-	"x-ui/database"
-	"x-ui/database/model"
-	"x-ui/util/common"
-	"x-ui/xray"
+	"xui/database"
+	"xui/database/model"
+	"xui/util/common"
+	"xui/xray"
 
 	"gorm.io/gorm"
 )

@@ -49,7 +49,7 @@ func GetDBPath() string {
 	return fmt.Sprintf("/etc/%s/%s.db", GetName(), GetName())
 }
 
-// Role is fixed by the installer in /etc/x-ui/role.env. A missing role fails
+// Role is fixed by the installer in /etc/xui/role.env. A missing role fails
 // closed as manager: it cannot expose an agent API or start a proxy by accident.
 func Role() string {
 	if strings.EqualFold(os.Getenv("XUI_ROLE"), "agent") {

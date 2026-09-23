@@ -95,8 +95,8 @@ install_base() {
 
 choose_role() {
     local previous=""
-    if [[ -f /etc/x-ui/role.env ]]; then
-        previous=$(sed -n 's/^XUI_ROLE=//p' /etc/x-ui/role.env | head -1)
+    if [[ -f /etc/xui/role.env ]]; then
+        previous=$(sed -n 's/^XUI_ROLE=//p' /etc/xui/role.env | head -1)
     fi
     if [[ -z "$XUI_ROLE" ]]; then
         echo "请选择安装角色：1) 服务端（管理端）  2) 被控端"
@@ -115,7 +115,7 @@ choose_role() {
         esac
     fi
     [[ "$XUI_ROLE" == manager || "$XUI_ROLE" == agent ]] || { echo "必须选择管理端或被控端"; exit 1; }
-    if [[ -d /etc/x-ui && -f /etc/x-ui/x-ui.db && -n "$previous" && "$previous" != "$XUI_ROLE" ]]; then
+    if [[ -d /etc/xui && -f /etc/xui/xui.db && -n "$previous" && "$previous" != "$XUI_ROLE" ]]; then
         echo "已有 $previous 数据库，不能原地切换为 $XUI_ROLE。请在新机器或新数据目录部署。"
         exit 1
     fi
@@ -128,32 +128,32 @@ build_source_archive() {
     git clone --depth 1 https://github.com/small32/XUI2.git "$build_dir/source" || return 1
     go_version=$(curl -fsSL https://go.dev/dl/?mode=json | python3 -c 'import json,sys; print(next(v["version"] for v in json.load(sys.stdin) if v["stable"]))') || return 1
     curl -fL --retry 3 "https://go.dev/dl/${go_version}.linux-${arch}.tar.gz" -o "$build_dir/go.tar.gz" || return 1
-    mkdir -p "$build_dir/toolchain" "$build_dir/package/x-ui/bin"
+    mkdir -p "$build_dir/toolchain" "$build_dir/package/xui/bin"
     tar -xzf "$build_dir/go.tar.gz" -C "$build_dir/toolchain" || return 1
-    (cd "$build_dir/source" && PATH="$build_dir/toolchain/go/bin:$PATH" CGO_ENABLED=1 "$build_dir/toolchain/go/bin/go" build -trimpath -o "$build_dir/package/x-ui/x-ui" main.go) || return 1
-    cp "$build_dir/source/x-ui.service" "$build_dir/source/x-ui.sh" "$build_dir/source/LICENSE" "$build_dir/package/x-ui/"
+    (cd "$build_dir/source" && PATH="$build_dir/toolchain/go/bin:$PATH" CGO_ENABLED=1 "$build_dir/toolchain/go/bin/go" build -trimpath -o "$build_dir/package/xui/xui" main.go) || return 1
+    cp "$build_dir/source/xui.service" "$build_dir/source/xui.sh" "$build_dir/source/LICENSE" "$build_dir/package/xui/"
     xray_version="v26.3.27"
     if [[ "$arch" == amd64 ]]; then xray_asset="Xray-linux-64.zip"; else xray_asset="Xray-linux-arm64-v8a.zip"; fi
     curl -fL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/${xray_version}/${xray_asset}" -o "$build_dir/xray.zip" || return 1
-    unzip -jo "$build_dir/xray.zip" xray -d "$build_dir/package/x-ui/bin" || return 1
-    mv "$build_dir/package/x-ui/bin/xray" "$build_dir/package/x-ui/bin/xray-linux-${arch}"
+    unzip -jo "$build_dir/xray.zip" xray -d "$build_dir/package/xui/bin" || return 1
+    mv "$build_dir/package/xui/bin/xray" "$build_dir/package/xui/bin/xray-linux-${arch}"
     for data_file in geoip.dat geosite.dat; do
-        curl -fL --retry 3 "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/${data_file}" -o "$build_dir/package/x-ui/bin/${data_file}" || return 1
+        curl -fL --retry 3 "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/${data_file}" -o "$build_dir/package/xui/bin/${data_file}" || return 1
     done
-    tar -C "$build_dir/package" -czf "$out" x-ui || return 1
+    tar -C "$build_dir/package" -czf "$out" xui || return 1
     rm -rf "$build_dir"
 }
 
 configure_role() {
-    mkdir -p /etc/x-ui
-    chmod 700 /etc/x-ui
-    printf 'XUI_ROLE=%s\n' "$XUI_ROLE" > /etc/x-ui/role.env
-    chmod 600 /etc/x-ui/role.env
-    if [[ "$XUI_ROLE" == agent && ! -f /etc/x-ui/agent.env ]]; then
-        printf 'XUI_AGENT_TOKEN=%s\n' "$(openssl rand -hex 32)" > /etc/x-ui/agent.env
-        chmod 600 /etc/x-ui/agent.env
+    mkdir -p /etc/xui
+    chmod 700 /etc/xui
+    printf 'XUI_ROLE=%s\n' "$XUI_ROLE" > /etc/xui/role.env
+    chmod 600 /etc/xui/role.env
+    if [[ "$XUI_ROLE" == agent && ! -f /etc/xui/agent.env ]]; then
+        printf 'XUI_AGENT_TOKEN=%s\n' "$(openssl rand -hex 32)" > /etc/xui/agent.env
+        chmod 600 /etc/xui/agent.env
     fi
-    if [[ ! -f /etc/x-ui/panel.crt || ! -f /etc/x-ui/panel.key ]]; then
+    if [[ ! -f /etc/xui/panel.crt || ! -f /etc/xui/panel.key ]]; then
         read -r -p "本机面板的主机名或 IP [$(hostname -f)]: " api_host
         api_host="${api_host:-$(hostname -f)}"
         if [[ "$api_host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ || "$api_host" == *:* ]]; then
@@ -161,19 +161,19 @@ configure_role() {
         else
             alt_name="DNS:${api_host}"
         fi
-        openssl req -x509 -newkey rsa:3072 -nodes -days 365 -keyout /etc/x-ui/panel.key -out /etc/x-ui/panel.crt -subj "/CN=${api_host}" -addext "subjectAltName=${alt_name}" || return 1
-        chmod 600 /etc/x-ui/panel.key
-        chmod 644 /etc/x-ui/panel.crt
+        openssl req -x509 -newkey rsa:3072 -nodes -days 365 -keyout /etc/xui/panel.key -out /etc/xui/panel.crt -subj "/CN=${api_host}" -addext "subjectAltName=${alt_name}" || return 1
+        chmod 600 /etc/xui/panel.key
+        chmod 644 /etc/xui/panel.crt
     fi
-    /usr/local/x-ui/x-ui setting -cert /etc/x-ui/panel.crt -key /etc/x-ui/panel.key || return 1
+    /usr/local/xui/xui setting -cert /etc/xui/panel.crt -key /etc/xui/panel.key || return 1
     if [[ "$XUI_ROLE" != agent ]]; then return 0; fi
     echo "被控端 API 令牌（请复制到管理端，仅管理员可见）："
-    sed -n 's/^XUI_AGENT_TOKEN=//p' /etc/x-ui/agent.env
+    sed -n 's/^XUI_AGENT_TOKEN=//p' /etc/xui/agent.env
     echo "证书 SHA256 指纹（填入管理端）："
-    openssl x509 -in /etc/x-ui/panel.crt -outform DER | sha256sum | awk '{print $1}'
+    openssl x509 -in /etc/xui/panel.crt -outform DER | sha256sum | awk '{print $1}'
 }
 
-#This function will be called when user installed x-ui out of sercurity
+#This function will be called when user installed xui out of sercurity
 config_after_install() {
     echo -e "${yellow}出于安全考虑，安装/更新完成后需要强制修改端口与账户密码${plain}"
     read -p "确认是否继续?[y/n]": config_confirm
@@ -185,16 +185,16 @@ config_after_install() {
         read -p "请设置面板访问端口:" config_port
         echo -e "${yellow}您的面板访问端口将设定为:${config_port}${plain}"
         echo -e "${yellow}确认设定,设定中${plain}"
-        /usr/local/x-ui/x-ui setting -username "${config_account}" -password "${config_password}"
+        /usr/local/xui/xui setting -username "${config_account}" -password "${config_password}"
         echo -e "${yellow}账户密码设定完成${plain}"
-        /usr/local/x-ui/x-ui setting -port "${config_port}"
+        /usr/local/xui/xui setting -port "${config_port}"
         echo -e "${yellow}面板端口设定完成${plain}"
     else
         echo -e "${red}已取消,所有设置项均为默认设置,请及时修改${plain}"
     fi
 }
 
-install_x-ui() {
+install_xui() {
     cd /usr/local/
 
     if [ $# == 0 ]; then
@@ -202,12 +202,12 @@ install_x-ui() {
         if [[ -n "$last_version" ]]; then echo "检测到 XUI2 最新版本：$last_version"; fi
     else
         last_version=$1
-        echo -e "开始安装 x-ui v$1"
+        echo -e "开始安装 xui v$1"
     fi
 
-    pkg_path="/usr/local/x-ui-linux-${arch}.tar.gz"
+    pkg_path="/usr/local/xui-linux-${arch}.tar.gz"
     if [[ -n "$last_version" ]]; then
-        pkg_url="${XUI_RELEASE_URL}/${last_version}/x-ui-linux-${arch}.tar.gz"
+        pkg_url="${XUI_RELEASE_URL}/${last_version}/xui-linux-${arch}.tar.gz"
         if ! curl -fL --retry 3 -o "$pkg_path" "$pkg_url"; then
             echo "下载发行包失败"; exit 1
         fi
@@ -216,39 +216,39 @@ install_x-ui() {
         last_version="source"
     fi
 
-    staging_dir=$(mktemp -d /usr/local/x-ui-staging.XXXXXX) || exit 1
-    if ! tar -xzf x-ui-linux-${arch}.tar.gz -C "$staging_dir"; then
+    staging_dir=$(mktemp -d /usr/local/xui-staging.XXXXXX) || exit 1
+    if ! tar -xzf xui-linux-${arch}.tar.gz -C "$staging_dir"; then
         echo -e "${red}安装包解压失败，保留当前安装${plain}"; rm -rf "$staging_dir"; exit 1
     fi
-    if [[ ! -x "$staging_dir/x-ui/x-ui" || ! -x "$staging_dir/x-ui/bin/xray-linux-${arch}" ]]; then
+    if [[ ! -x "$staging_dir/xui/xui" || ! -x "$staging_dir/xui/bin/xray-linux-${arch}" ]]; then
         echo -e "${red}安装包内容不完整，保留当前安装${plain}"; rm -rf "$staging_dir"; exit 1
     fi
-    rm -f x-ui-linux-${arch}.tar.gz
-    systemctl stop x-ui
-    old_dir="/usr/local/x-ui"
-    backup_dir="/usr/local/x-ui.previous"
+    rm -f xui-linux-${arch}.tar.gz
+    systemctl stop xui
+    old_dir="/usr/local/xui"
+    backup_dir="/usr/local/xui.previous"
     rm -rf "$backup_dir"
     if [[ -e "$old_dir" ]]; then mv "$old_dir" "$backup_dir"; fi
-    mv "$staging_dir/x-ui" "$old_dir" || { [[ -e "$backup_dir" ]] && mv "$backup_dir" "$old_dir"; rm -rf "$staging_dir"; exit 1; }
+    mv "$staging_dir/xui" "$old_dir" || { [[ -e "$backup_dir" ]] && mv "$backup_dir" "$old_dir"; rm -rf "$staging_dir"; exit 1; }
     rm -rf "$staging_dir"
     cd "$old_dir"
-    chmod +x x-ui bin/xray-linux-${arch}
-    cp -f x-ui.service /etc/systemd/system/
-    cp -f x-ui.sh /usr/bin/x-ui
-    chmod +x /usr/local/x-ui/x-ui.sh
-    chmod +x /usr/bin/x-ui
+    chmod +x xui bin/xray-linux-${arch}
+    cp -f xui.service /etc/systemd/system/
+    cp -f xui.sh /usr/bin/xui
+    chmod +x /usr/local/xui/xui.sh
+    chmod +x /usr/bin/xui
     configure_role || { echo "角色配置失败"; exit 1; }
     config_after_install
     #echo -e "如果是全新安装，默认网页端口为 ${green}54321${plain}，用户名和密码默认都是 ${green}admin${plain}"
     #echo -e "请自行确保此端口没有被其他程序占用，${yellow}并且确保 54321 端口已放行${plain}"
-    #    echo -e "若想将 54321 修改为其它端口，输入 x-ui 命令进行修改，同样也要确保你修改的端口也是放行的"
+    #    echo -e "若想将 54321 修改为其它端口，输入 xui 命令进行修改，同样也要确保你修改的端口也是放行的"
     #echo -e ""
     #echo -e "如果是更新面板，则按你之前的方式访问面板"
     #echo -e ""
     systemctl daemon-reload
-    systemctl enable x-ui
+    systemctl enable xui
     start_ok=1
-    systemctl start x-ui || start_ok=0
+    systemctl start xui || start_ok=0
     # Type=simple reports success as soon as the process is spawned. Wait for
     # the process to remain active so startup/configuration failures still roll
     # back before the previous installation is discarded.
@@ -256,7 +256,7 @@ install_x-ui() {
         start_ok=0
         active_checks=0
         for attempt in {1..5}; do
-            if systemctl is-active --quiet x-ui; then
+            if systemctl is-active --quiet xui; then
                 active_checks=$((active_checks + 1))
                 if [[ $active_checks -eq 5 ]]; then
                     start_ok=1
@@ -273,32 +273,32 @@ install_x-ui() {
         rm -rf "$old_dir"
         [[ -e "$backup_dir" ]] && mv "$backup_dir" "$old_dir"
         systemctl daemon-reload
-        systemctl start x-ui
+        systemctl start xui
         exit 1
     fi
     rm -rf "$backup_dir"
 
-    echo -e "${green}x-ui v${last_version}${plain} 安装完成，面板已启动，"
+    echo -e "${green}xui v${last_version}${plain} 安装完成，面板已启动，"
     echo -e "发行页：${green}${XUI_RELEASES_PAGE}${plain}，后续升级从同一发行页获取。"
     echo -e ""
-    echo -e "x-ui 管理脚本使用方法: "
+    echo -e "xui 管理脚本使用方法: "
     echo -e "----------------------------------------------"
-    echo -e "x-ui              - 显示管理菜单 (功能更多)"
-    echo -e "x-ui start        - 启动 x-ui 面板"
-    echo -e "x-ui stop         - 停止 x-ui 面板"
-    echo -e "x-ui restart      - 重启 x-ui 面板"
-    echo -e "x-ui status       - 查看 x-ui 状态"
-    echo -e "x-ui enable       - 设置 x-ui 开机自启"
-    echo -e "x-ui disable      - 取消 x-ui 开机自启"
-    echo -e "x-ui log          - 查看 x-ui 日志"
-    echo -e "x-ui v2-ui        - 迁移本机器的 v2-ui 账号数据至 x-ui"
-    echo -e "x-ui update       - 更新 x-ui 面板"
-    echo -e "x-ui install      - 安装 x-ui 面板"
-    echo -e "x-ui uninstall    - 卸载 x-ui 面板"
+    echo -e "xui              - 显示管理菜单 (功能更多)"
+    echo -e "xui start        - 启动 xui 面板"
+    echo -e "xui stop         - 停止 xui 面板"
+    echo -e "xui restart      - 重启 xui 面板"
+    echo -e "xui status       - 查看 xui 状态"
+    echo -e "xui enable       - 设置 xui 开机自启"
+    echo -e "xui disable      - 取消 xui 开机自启"
+    echo -e "xui log          - 查看 xui 日志"
+    echo -e "xui v2-ui        - 迁移本机器的 v2-ui 账号数据至 xui"
+    echo -e "xui update       - 更新 xui 面板"
+    echo -e "xui install      - 安装 xui 面板"
+    echo -e "xui uninstall    - 卸载 xui 面板"
     echo -e "----------------------------------------------"
 }
 
 echo -e "${green}开始安装${plain}"
 choose_role
 install_base
-install_x-ui $1
+install_xui $1

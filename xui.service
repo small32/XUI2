@@ -1,0 +1,14 @@
+[Unit]
+Description=xui Service
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/usr/local/xui/
+EnvironmentFile=/etc/xui/role.env
+EnvironmentFile=-/etc/xui/agent.env
+ExecStart=/usr/local/xui/xui
+
+[Install]
+WantedBy=multi-user.target

@@ -3,7 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"x-ui/database/model"
+	"xui/database/model"
 )
 
 // Only file-based certificates inherit panel paths; inline certificates remain unchanged.

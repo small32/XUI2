@@ -2,7 +2,7 @@ package job
 
 import (
 	"testing"
-	"x-ui/xray"
+	"xui/xray"
 )
 
 func TestTrafficDeltasCountFirstSampleAndCounterReset(t *testing.T) {

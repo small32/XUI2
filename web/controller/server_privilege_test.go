@@ -11,9 +11,9 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 
-	"x-ui/database"
-	"x-ui/database/model"
-	"x-ui/web/session"
+	"xui/database"
+	"xui/database/model"
+	"xui/web/session"
 )
 
 // 受限登录不得访问 /server 等管理接口：受限会话不建立占位用户，

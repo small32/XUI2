@@ -3,7 +3,7 @@ package service
 import (
 	"testing"
 
-	"x-ui/xray"
+	"xui/xray"
 )
 
 // 面板状态轮询、10 秒流量任务、xray 存活检测会并发读取 xray 运行状态，

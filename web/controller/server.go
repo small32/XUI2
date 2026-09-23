@@ -5,9 +5,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"time"
-	"x-ui/config"
-	"x-ui/web/global"
-	"x-ui/web/service"
+	"xui/config"
+	"xui/web/global"
+	"xui/web/service"
 )
 
 type ServerController struct {

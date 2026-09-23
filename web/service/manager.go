@@ -17,9 +17,9 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"x-ui/database"
-	"x-ui/database/model"
-	"x-ui/web/entity"
+	"xui/database"
+	"xui/database/model"
+	"xui/web/entity"
 
 	"gorm.io/gorm"
 )

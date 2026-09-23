@@ -13,14 +13,14 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 
-	"x-ui/database"
-	"x-ui/database/model"
+	"xui/database"
+	"xui/database/model"
 )
 
 // 入站表单的「按月计算」勾选必须真正落库：写不进去会让账号一直累计（客户月初用不了），
 // 也回退不了（取消勾选是切到“流量用完即止”的唯一入口）。
 func TestInboundMonthlyResetRoundTrip(t *testing.T) {
-	if err := database.InitDB(filepath.Join(t.TempDir(), "x-ui.db")); err != nil {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
 	db := database.GetDB()

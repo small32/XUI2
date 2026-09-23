@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
-	"x-ui/database"
-	"x-ui/database/model"
+	"xui/database"
+	"xui/database/model"
 )
 
 const (

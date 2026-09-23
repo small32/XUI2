@@ -3,7 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"x-ui/database/model"
+	"xui/database/model"
 )
 
 // WithLoginPassword only changes response data, never persisted credentials.

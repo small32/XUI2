@@ -3,9 +3,9 @@ package job
 import (
 	"sync"
 
-	"x-ui/logger"
-	"x-ui/web/service"
-	"x-ui/xray"
+	"xui/logger"
+	"xui/web/service"
+	"xui/xray"
 )
 
 type XrayTrafficJob struct {
