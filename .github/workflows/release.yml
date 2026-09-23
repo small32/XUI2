@@ -34,50 +34,30 @@ jobs:
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a version such as 0.0.1'; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-  build:
+  build-amd64:
     needs: prepare
     runs-on: ubuntu-22.04
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            musl_pkg: musl-tools
-            cc: x86_64-linux-musl-gcc
-            xray: Xray-linux-64.zip
-          - arch: arm64
-            musl_url: https://musl.cc/aarch64-linux-musl-cross.tgz
-            cc: aarch64-linux-musl-gcc
-            xray: Xray-linux-arm64-v8a.zip
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GOOS: linux
+      GOARCH: amd64
+      CGO_ENABLED: '1'
+      CC: x86_64-linux-musl-gcc
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v7
         with:
           go-version: '1.25'
-      - name: Install musl cross toolchain
-        run: |
-          set -euo pipefail
-          if [[ -n "${{ matrix.musl_pkg }}" ]]; then
-            sudo apt-get update && sudo apt-get install -y ${{ matrix.musl_pkg }}
-          else
-            curl -fL --retry 3 "${{ matrix.musl_url }}" -o musl-cross.tgz
-            tar -xzf musl-cross.tgz
-            echo "$PWD/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
-          fi
+      - name: Install musl toolchain
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build and package
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-          GOOS: linux
-          GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: '1'
-          CC: ${{ matrix.cc }}
         run: |
           set -euo pipefail
           printf '%s\n' "$VERSION" > config/version
           mkdir -p dist/xui/bin
           go build -trimpath -ldflags '-linkmode external -extldflags "-static"' -o dist/xui/xui main.go
           cp xui.service xui.sh LICENSE dist/xui/
-          curl -fL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/${{ matrix.xray }}" -o xray.zip
+          curl -fL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-64.zip" -o xray.zip
           unzip -j xray.zip xray -d dist/xui/bin
           mv dist/xui/bin/xray "dist/xui/bin/xray-linux-${GOARCH}"
           for file in geoip.dat geosite.dat; do
@@ -88,27 +68,74 @@ jobs:
           test -s dist/xui/bin/geosite.dat
           # 确认面板为纯静态链接：不依赖宿主 glibc 版本，任意 Linux 均可运行
           file dist/xui/xui
-          if ldd dist/xui/xui 2>&1 | grep -q 'not a dynamic executable'; then
+          if file dist/xui/xui | grep -q 'statically linked'; then
             echo "static link OK"
           else
-            ldd dist/xui/xui 2>&1
             echo "dynamic link detected"
             exit 1
           fi
-          if [ "$GOARCH" = amd64 ]; then
-            dist/xui/xui -v
-            dist/xui/bin/xray-linux-amd64 version
-          fi
-          tar -C dist -czf "xui-linux-${GOARCH}.tar.gz" xui
-          tar -tzf "xui-linux-${GOARCH}.tar.gz"
+          dist/xui/xui -v
+          dist/xui/bin/xray-linux-amd64 version
+          tar -C dist -czf "xui-linux-amd64.tar.gz" xui
+          tar -tzf "xui-linux-amd64.tar.gz"
       - uses: actions/upload-artifact@v4
         with:
-          name: xui-linux-${{ matrix.arch }}
-          path: xui-linux-${{ matrix.arch }}.tar.gz
+          name: xui-linux-amd64
+          path: xui-linux-amd64.tar.gz
+          if-no-files-found: error
+
+  build-arm64:
+    needs: prepare
+    runs-on: ubuntu-22.04
+    container: ghcr.io/dockcross/linux-arm64:latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      GOOS: linux
+      GOARCH: arm64
+      CGO_ENABLED: '1'
+      CC: aarch64-linux-musl-gcc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25'
+      - name: Install packaging tools
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends curl unzip ca-certificates
+      - name: Build and package
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$VERSION" > config/version
+          mkdir -p dist/xui/bin
+          go build -trimpath -ldflags '-linkmode external -extldflags "-static"' -o dist/xui/xui main.go
+          cp xui.service xui.sh LICENSE dist/xui/
+          curl -fL --retry 3 "https://github.com/XTLS/Xray-core/releases/download/v26.3.27/Xray-linux-arm64-v8a.zip" -o xray.zip
+          unzip -j xray.zip xray -d dist/xui/bin
+          mv dist/xui/bin/xray "dist/xui/bin/xray-linux-${GOARCH}"
+          for file in geoip.dat geosite.dat; do
+            curl -fL --retry 3 "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/$file" -o "dist/xui/bin/$file"
+          done
+          chmod +x dist/xui/xui dist/xui/xui.sh "dist/xui/bin/xray-linux-${GOARCH}"
+          test -s dist/xui/bin/geoip.dat
+          test -s dist/xui/bin/geosite.dat
+          # 确认面板为纯静态链接：不依赖宿主 glibc 版本，任意 Linux 均可运行
+          file dist/xui/xui
+          if file dist/xui/xui | grep -q 'statically linked'; then
+            echo "static link OK"
+          else
+            echo "dynamic link detected"
+            exit 1
+          fi
+          tar -C dist -czf "xui-linux-arm64.tar.gz" xui
+          tar -tzf "xui-linux-arm64.tar.gz"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xui-linux-arm64
+          path: xui-linux-arm64.tar.gz
           if-no-files-found: error
 
   publish:
-    needs: [prepare, build]
+    needs: [prepare, build-amd64, build-arm64]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
