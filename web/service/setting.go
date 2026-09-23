@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net"
@@ -348,7 +349,13 @@ func (s *SettingService) selfCertFingerprint() string {
 	if err != nil {
 		return "-"
 	}
-	sum := sha256.Sum256(data)
+	// 管理端按叶子证书 DER（cert.Raw）固定指纹，这里必须用同一口径；
+	// 直接哈希 PEM 文本会得到完全不同的值。
+	block, _ := pem.Decode(data)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "-"
+	}
+	sum := sha256.Sum256(block.Bytes)
 	return hex.EncodeToString(sum[:])
 }
 

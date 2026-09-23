@@ -75,7 +75,7 @@ func (a *ServerManagementController) page(c *gin.Context) {
 }
 func (a *ServerManagementController) setting(c *gin.Context) {
 	var v entity.ServerSetting
-	if err := c.ShouldBindJSON(&v); err != nil {
+	if err := c.ShouldBind(&v); err != nil {
 		jsonMsg(c, "保存设置", err)
 		return
 	}
@@ -95,7 +95,7 @@ func (a *ServerManagementController) nodeList(c *gin.Context) {
 }
 func (a *ServerManagementController) saveNode(c *gin.Context) {
 	var input service.NodeInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := c.ShouldBind(&input); err != nil {
 		jsonMsg(c, "保存被控端", err)
 		return
 	}
@@ -138,9 +138,9 @@ func (a *ServerManagementController) monthlyReset() {
 }
 func (a *ServerManagementController) resetSnapshots(c *gin.Context) {
 	var form struct {
-		InboundId int `json:"inboundId"`
+		InboundId int `json:"inboundId" form:"inboundId"`
 	}
-	_ = c.ShouldBindJSON(&form)
+	_ = c.ShouldBind(&form)
 	if bound := session.GetLoginInboundId(c); bound > 0 {
 		form.InboundId = bound
 	}

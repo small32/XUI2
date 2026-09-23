@@ -32,13 +32,13 @@ var managerMu sync.Mutex
 type ServerManagementService struct{}
 
 type NodeInput struct {
-	ID         int    `json:"id"`
-	Name       string `json:"name"`
-	URL        string `json:"url"`
-	Address    string `json:"address"`
-	Token      string `json:"token"`
-	CertSHA256 string `json:"certSha256"`
-	Enabled    bool   `json:"enabled"`
+	ID         int    `json:"id" form:"id"`
+	Name       string `json:"name" form:"name"`
+	URL        string `json:"url" form:"url"`
+	Address    string `json:"address" form:"address"`
+	Token      string `json:"token" form:"token"`
+	CertSHA256 string `json:"certSha256" form:"certSha256"`
+	Enabled    bool   `json:"enabled" form:"enabled"`
 }
 
 type agentTraffic struct {
