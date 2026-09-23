@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -313,6 +315,13 @@ func (s *Server) Start() (err error) {
 	if err != nil {
 		return err
 	}
+	// 未显式配置面板证书时，自动发现 /root/cert 下的证书（通常由 xui 一键申请 SSL 生成）。
+	if certFile == "" || keyFile == "" {
+		if discoveredCert, discoveredKey := discoverRootCert(); discoveredCert != "" && discoveredKey != "" {
+			certFile, keyFile = discoveredCert, discoveredKey
+			logger.Info("auto-using cert from /root/cert: ", certFile, " / ", keyFile)
+		}
+	}
 	listen, err := s.settingService.GetListen()
 	if err != nil {
 		return err
@@ -357,6 +366,55 @@ func (s *Server) Start() (err error) {
 	}()
 
 	return nil
+}
+
+// discoverRootCert 扫描 /root/cert 目录，尝试为面板找到一对证书与私钥。
+func discoverRootCert() (certFile, keyFile string) {
+	return discoverCertIn("/root/cert")
+}
+
+// discoverCertIn 在给定目录中查找一对面板证书与私钥。
+// 优先返回 fullchain.cer + fullchain.key；否则按同名 .cer/.key 配对。
+// 找不到可用的证书对时返回两个空串。
+func discoverCertIn(dir string) (certFile, keyFile string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", ""
+	}
+	// 1) 优先：fullchain.cer 配 fullchain.key
+	if c := filepath.Join(dir, "fullchain.cer"); fileExists(c) {
+		if k := filepath.Join(dir, "fullchain.key"); fileExists(k) {
+			return c, k
+		}
+	}
+	// 2) 同名配对的 .cer 与 .key：遍历目录条目
+	type pair struct{ cert, key string }
+	pairs := make([]pair, 0)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if filepath.Ext(name) == ".cer" {
+			base := strings.TrimSuffix(name, ".cer")
+			k := filepath.Join(dir, base+".key")
+			if fileExists(k) {
+				pairs = append(pairs, pair{cert: filepath.Join(dir, name), key: k})
+			}
+		}
+	}
+	if len(pairs) > 0 {
+		// 若有 fullchain.cer/fullchain.key 之外的匹配，取字典序靠前的一个，保持确定性
+		sort.Slice(pairs, func(i, j int) bool { return pairs[i].cert < pairs[j].cert })
+		return pairs[0].cert, pairs[0].key
+	}
+	return "", ""
+}
+
+// fileExists 报告路径是否为存在的常规文件。
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func (s *Server) Stop() error {
