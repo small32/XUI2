@@ -149,6 +149,7 @@
 <script>
 
     const restricted = {{ .restricted }};
+    const role = "{{ .role }}";
 
     const columns = [{
         title: "操作",
@@ -228,7 +229,7 @@
             async getDBInbounds() {
                 this.loading();
                 const msg = await HttpUtil.post('/xui/inbound/list');
-                if (!restricted) {
+                if (role === 'manager') {
                     // 入站列表只有本地用量，而“已超限”按本地 + 远程的汇总口径判定，
                     // 因此管理员这里多取一次流量汇总，按 inboundId 建立状态索引，
                     // 让列表页与汇总页筛出来的结果完全一致。

@@ -38,8 +38,7 @@
                     <a-tabs default-active-key="1">
                         <a-tab-pane key="1" tab="面板配置">
                             <a-list item-layout="horizontal" style="background: white">
-                                <setting-list-item type="switch" title="非管理员用户登录" desc="开启后允许非管理员用户（端口号+入站密码）登录；关闭则禁止受限账号登录，保存后立即生效" v-model="allSetting.restrictedLoginEnable"></setting-list-item>
-                                <setting-list-item type="text" title="本地服务器名称" desc="用于 Clash 订阅节点名称，保存后重新生成订阅生效" v-model="allSetting.serverName"></setting-list-item>
+                                {{if eq .role "manager"}}<setting-list-item type="switch" title="非管理员用户登录" desc="开启后允许非管理员用户（端口号+入站密码）登录；关闭则禁止受限账号登录，保存后立即生效" v-model="allSetting.restrictedLoginEnable"></setting-list-item>{{end}}
                                 <setting-list-item type="text" title="面板监听 IP" desc="默认留空监听所有 IP，重启面板生效" v-model="allSetting.webListen"></setting-list-item>
                                 <setting-list-item type="number" title="面板监听端口" desc="重启面板生效" v-model.number="allSetting.webPort"></setting-list-item>
                                 <setting-list-item type="text" title="面板证书公钥文件路径" desc="填写一个 '/' 开头的绝对路径，重启面板生效" v-model="allSetting.webCertFile"></setting-list-item>
