@@ -22,7 +22,8 @@ parse_tag_name() {
 # ======================================================
 
 # check root
-[[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
+# EUID=0 即当前已具备 root 权限（真 root 或以 sudo 提权），否则拒绝执行。
+[[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 请在 root 用户或 sudo 权限下执行此脚本！\n" >&2 && exit 1
 
 # check os
 if [[ -f /etc/redhat-release ]]; then
@@ -180,8 +181,7 @@ config_after_install() {
     if [[ x"${config_confirm}" == x"y" || x"${config_confirm}" == x"Y" ]]; then
         read -p "请设置您的账户名:" config_account
         echo -e "${yellow}您的账户名将设定为:${config_account}${plain}"
-        read -r -s -p "请设置您的账户密码:" config_password
-        echo
+        read -r -p "请设置您的账户密码:" config_password
         read -p "请设置面板访问端口:" config_port
         echo -e "${yellow}您的面板访问端口将设定为:${config_port}${plain}"
         echo -e "${yellow}确认设定,设定中${plain}"

@@ -24,7 +24,7 @@ function LOGI() {
 XUI_RAW_URL="https://raw.githubusercontent.com/small32/XUI2/main"
 # ======================================================
 # check root
-[[ $EUID -ne 0 ]] && LOGE "错误:  必须使用root用户运行此脚本!\n" && exit 1
+[[ $EUID -ne 0 ]] && LOGE "错误:  请在 root 用户或 sudo 权限下执行此脚本!\n" && exit 1
 
 # check os
 if [[ -f /etc/redhat-release ]]; then
@@ -421,68 +421,73 @@ ssl_cert_issue() {
     LOGI "1.知晓Cloudflare 注册邮箱"
     LOGI "2.知晓Cloudflare Global API Key"
     LOGI "3.域名已通过Cloudflare进行解析到当前服务器"
-    LOGI "4.该脚本申请证书默认安装路径为/root/cert目录"
+    LOGI "4.该脚本申请的证书默认安装到 /root/cert 目录"
     confirm "我已确认以上内容[y/n]" "y"
     if [ $? -eq 0 ]; then
-        cd ~
+        local certPath=/root/cert
+        local acme_sh=~/.acme.sh/acme.sh
         LOGI "安装Acme脚本"
-        curl https://get.acme.sh | sh
-        if [ $? -ne 0 ]; then
-            LOGE "安装acme脚本失败"
-            exit 1
+        if [ ! -x "$acme_sh" ]; then
+            curl https://get.acme.sh | sh
+            if [ $? -ne 0 ]; then
+                LOGE "安装acme脚本失败"
+                exit 1
+            fi
         fi
-        CF_Domain=""
-        CF_GlobalKey=""
-        CF_AccountEmail=""
-        certPath=/root/cert
         if [ ! -d "$certPath" ]; then
-            mkdir $certPath
+            mkdir -p "$certPath"
         else
-            rm -rf $certPath
-            mkdir $certPath
+            rm -rf "$certPath"
+            mkdir -p "$certPath"
         fi
         LOGD "请设置域名:"
-        read -p "Input your domain here:" CF_Domain
+        read -r -p "Input your domain here:" CF_Domain
         LOGD "你的域名设置为:${CF_Domain}"
         LOGD "请设置API密钥:"
-        read -p "Input your key here:" CF_GlobalKey
+        read -r -p "Input your key here:" CF_GlobalKey
         LOGD "你的API密钥为:${CF_GlobalKey}"
         LOGD "请设置注册邮箱:"
-        read -p "Input your email here:" CF_AccountEmail
+        read -r -p "Input your email here:" CF_AccountEmail
         LOGD "你的注册邮箱为:${CF_AccountEmail}"
-        ~/.acme.sh/acme.sh --set-default-ca --server letsencrypt
+        if [[ -z "$CF_Domain" || -z "$CF_GlobalKey" || -z "$CF_AccountEmail" ]]; then
+            LOGE "域名、API密钥、注册邮箱均不能为空,脚本退出"
+            exit 1
+        fi
+        "$acme_sh" --set-default-ca --server letsencrypt
         if [ $? -ne 0 ]; then
             LOGE "修改默认CA为Lets'Encrypt失败,脚本退出"
             exit 1
         fi
         export CF_Key="${CF_GlobalKey}"
-        export CF_Email=${CF_AccountEmail}
-        ~/.acme.sh/acme.sh --issue --dns dns_cf -d ${CF_Domain} -d *.${CF_Domain} --log
-        if [ $? -ne 0 ]; then
+        export CF_Email="${CF_AccountEmail}"
+        LOGI "正在通过 Cloudflare DNS 验证签发证书(域名: ${CF_Domain})..."
+        if ! "$acme_sh" --issue --dns dns_cf -d "${CF_Domain}" --log; then
             LOGE "证书签发失败,脚本退出"
+            LOGI "详细日志请查看: ${acme_sh}.log"
+            LOGI "可加 --debug 参数获取详细报错: $acme_sh --issue --dns dns_cf -d ${CF_Domain} --debug"
             exit 1
         else
             LOGI "证书签发成功,安装中..."
         fi
-        ~/.acme.sh/acme.sh --installcert -d ${CF_Domain} -d *.${CF_Domain} --ca-file /root/cert/ca.cer \
-        --cert-file /root/cert/${CF_Domain}.cer --key-file /root/cert/${CF_Domain}.key \
-        --fullchain-file /root/cert/fullchain.cer
-        if [ $? -ne 0 ]; then
+        if ! "$acme_sh" --installcert -d "${CF_Domain}" --ca-file "${certPath}/ca.cer" \
+            --cert-file "${certPath}/${CF_Domain}.cer" --key-file "${certPath}/${CF_Domain}.key" \
+            --fullchain-file "${certPath}/fullchain.cer"; then
             LOGE "证书安装失败,脚本退出"
             exit 1
         else
             LOGI "证书安装成功,开启自动更新..."
         fi
-        ~/.acme.sh/acme.sh --upgrade --auto-upgrade
+        "$acme_sh" --upgrade --auto-upgrade
+        # 注册 acme.sh 原生自动续期定时任务：acme.sh 将定期检查并在证书到期前自动重签
+        "$acme_sh" install-cronjob 2>/dev/null
         if [ $? -ne 0 ]; then
             LOGE "自动更新设置失败,脚本退出"
-            ls -lah cert
-            chmod 755 $certPath
+            chmod 755 "$certPath"
             exit 1
         else
-            LOGI "证书已安装且已开启自动更新,具体信息如下"
-            ls -lah cert
-            chmod 755 $certPath
+            LOGI "证书已安装并已开启自动更新与自动续期(acme.sh 将在到期前自动重签)"
+            ls -lah "$certPath"
+            chmod 755 "$certPath"
         fi
     else
         show_menu
