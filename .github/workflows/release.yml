@@ -103,6 +103,7 @@ jobs:
         run: |
           apt-get update && apt-get install -y --no-install-recommends curl unzip ca-certificates
       - name: Build and package
+        shell: bash
         run: |
           set -euo pipefail
           printf '%s\n' "$VERSION" > config/version
