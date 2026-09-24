@@ -20,7 +20,7 @@
                     <a-table-column title="用户名" data-index="username"></a-table-column>
                     <a-table-column title="端口" data-index="port"></a-table-column>
                     <a-table-column title="消耗流量" data-index="totalText"></a-table-column>
-                    <a-table-column title="流量限制" data-index="limitText"></a-table-column>
+                    <a-table-column title="总流量" data-index="limitText"></a-table-column>
                     <a-table-column title="到期时间">
                         <template slot-scope="text,row">
                             <span v-if="row.expiryTime>0">[[ DateUtil.formatDateMillis(row.expiryTime) ]]</span>
@@ -133,7 +133,7 @@
                 this.snapshotModal.loading = false;
                 if (m.success) {
                     const page = m.obj || {nodes: [], rows: []};
-                    // 动态列：月份 / 消耗流量 / 历史被控端节点 / 当月流量限制。
+                    // 动态列：月份 / 消耗流量 / 历史被控端节点 / 总流量。
                     // 节点列名取留档时的名称和 ID，当月无留档显示 "-"。
                     this.snapshotModal.columns = [
                         {title: '月份', dataIndex: 'period'},
@@ -143,7 +143,7 @@
                             key: 'node_' + n,
                             customRender: (text, r) => (r.nodeUsedText && r.nodeUsedText[n]) || '-'
                         })),
-                        {title: '流量限制', dataIndex: 'limitText'},
+                        {title: '总流量', dataIndex: 'limitText'},
                     ];
                     this.snapshotModal.rows = page.rows || [];
                 } else this.$message.error(m.msg);

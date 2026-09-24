@@ -87,11 +87,7 @@
                                 <a-tag color="blue">[[ dbInbound.protocol ]]</a-tag>
                             </template>
                             <template slot="traffic" slot-scope="text, dbInbound">
-                                <a-tag color="blue">[[ sizeFormat(dbInbound.up) ]] / [[ sizeFormat(dbInbound.down) ]]</a-tag>
-                                <template v-if="dbInbound.total > 0">
-                                    <a-tag v-if="dbInbound.up + dbInbound.down < dbInbound.total" color="cyan">[[ sizeFormat(dbInbound.total) ]]</a-tag>
-                                    <a-tag v-else color="red">[[ sizeFormat(dbInbound.total) ]]</a-tag>
-                                </template>
+                                <a-tag v-if="dbInbound.total > 0" color="cyan">[[ sizeFormat(dbInbound.total) ]]</a-tag>
                                 <a-tag v-else color="green">无限制</a-tag>
                             </template>
                             <template slot="settings" slot-scope="text, dbInbound">
@@ -186,9 +182,9 @@
         dataIndex: "port",
         width: 60,
     }, {
-        title: "流量↑|↓",
+        title: "总流量",
         align: 'center',
-        width: 150,
+        width: 80,
         scopedSlots: { customRender: 'traffic' },
     }, {
         title: "详细信息",
