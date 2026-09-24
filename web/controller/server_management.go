@@ -36,6 +36,7 @@ func NewServerManagementController(g *gin.RouterGroup) *ServerManagementControll
 	g.POST("/server/nodes/list", a.nodeList)
 	g.POST("/server/nodes/save", a.saveNode)
 	g.POST("/server/nodes/delete/:id", a.deleteNode)
+	g.POST("/server/nodes/force-delete/:id", a.forceDeleteNode)
 	g.POST("/server/tasks", a.tasks)
 	g.POST("/server/traffic", a.traffic)
 	g.GET("/traffic-summary", a.summaryPage)
@@ -47,6 +48,11 @@ func NewServerManagementController(g *gin.RouterGroup) *ServerManagementControll
 	cron.AddFunc(monthlyResetCronSpec, a.monthlyReset)
 	cron.AddFunc(monthlyResetFallbackSpec, a.monthlyReset)
 	cron.AddFunc("@every 1m", a.maybeHeartbeat)
+	cron.AddFunc("@every 1m", func() {
+		if err := a.service.DispatchPending(); err != nil {
+			logger.Warning("被控端后台重试失败: ", err)
+		}
+	})
 	return a
 }
 
@@ -144,6 +150,18 @@ func (a *ServerManagementController) deleteNode(c *gin.Context) {
 		return
 	}
 	jsonMsg(c, "删除被控端", a.service.DeleteNode(id))
+}
+func (a *ServerManagementController) forceDeleteNode(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "强制移除被控端", err)
+		return
+	}
+	err = a.service.ForceDeleteNode(id)
+	if err == nil {
+		logger.Warning("被控端已强制移除，旧服务器账号必须人工清理；节点 ID: ", id)
+	}
+	jsonMsg(c, "强制移除被控端", err)
 }
 func (a *ServerManagementController) tasks(c *gin.Context) {
 	v, err := a.service.PendingTasks()

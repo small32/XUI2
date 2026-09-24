@@ -123,8 +123,8 @@
                 this.snapshotModal.loading = false;
                 if (m.success) {
                     const page = m.obj || {nodes: [], rows: []};
-                    // 动态列：月份 / 总流量 / 每个启用被控端节点 / 当月流量限制。
-                    // 节点列名取被控端管理里的节点名称，当月无留档显示 "-"。
+                    // 动态列：月份 / 总流量 / 历史被控端节点 / 当月流量限制。
+                    // 节点列名取留档时的名称和 ID，当月无留档显示 "-"。
                     this.snapshotModal.columns = [
                         {title: '月份', dataIndex: 'period'},
                         {title: '总流量', dataIndex: 'usedText'},

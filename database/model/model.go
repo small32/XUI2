@@ -94,6 +94,7 @@ type SyncTask struct {
 	Error       string `json:"error"`
 	Attempts    int    `json:"attempts"`
 	CreatedAt   int64  `json:"createdAt"`
+	NextRetryAt int64  `json:"nextRetryAt" gorm:"index"`
 }
 
 // AgentOperation keeps reset results stable across manager retries.
@@ -120,6 +121,7 @@ type NodeTrafficSnapshot struct {
 	AccountID int `gorm:"uniqueIndex:idx_node_month_account"`
 	Yyyymm    int `gorm:"uniqueIndex:idx_node_month_account"`
 	Port      int
+	NodeName  string
 	Up        int64
 	Down      int64
 	ResetAt   int64

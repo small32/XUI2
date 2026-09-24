@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"xui/database"
@@ -210,12 +211,26 @@ func (s *ServerManagementService) ResetAccountTraffic(id int) error {
 		return err
 	}
 	var nodes []model.ManagedNode
-	if err := database.GetDB().Where("enabled = ?", true).Find(&nodes).Error; err != nil {
+	if err := database.GetDB().Find(&nodes).Error; err != nil {
 		return err
 	}
 	if err := database.GetDB().Transaction(func(tx *gorm.DB) error {
+		account.Enable = true
+		account.DisabledBy = ""
+		if err := tx.Model(&model.Inbound{}).Where("id = ?", account.Id).Updates(map[string]interface{}{"enable": true, "disabled_by": ""}).Error; err != nil {
+			return err
+		}
 		for _, node := range nodes {
-			if err := enqueue(tx, node.Id, &account, "reset", "manual-"+operationID()); err != nil {
+			if err := tx.Model(&model.SyncTask{}).
+				Where("node_id = ? AND account_id = ? AND status = ? AND kind IN ?", node.Id, account.Id, "pending", []string{"upsert", "delete", "disable", "enable"}).
+				Updates(map[string]interface{}{"status": "abandoned", "error": "已由手动重置取代"}).Error; err != nil {
+				return err
+			}
+			resetOperation := "manual-" + operationID()
+			if err := enqueue(tx, node.Id, &account, "reset", resetOperation); err != nil {
+				return err
+			}
+			if err := enqueue(tx, node.Id, &account, "enable", "manual-enable-"+strings.TrimPrefix(resetOperation, "manual-")); err != nil {
 				return err
 			}
 		}
@@ -223,8 +238,18 @@ func (s *ServerManagementService) ResetAccountTraffic(id int) error {
 	}); err != nil {
 		return err
 	}
+	dispatchErr := s.DispatchPending()
 	if err := s.DispatchPending(); err != nil {
+		dispatchErr = errors.Join(dispatchErr, err)
+	}
+	var remaining int64
+	if err := database.GetDB().Model(&model.SyncTask{}).
+		Where("account_id = ? AND status = ? AND (kind = ? OR kind = ?)", account.Id, "pending", "reset", "enable").
+		Count(&remaining).Error; err != nil {
 		return err
+	}
+	if remaining > 0 {
+		return errors.Join(dispatchErr, fmt.Errorf("该账号还有 %d 项远程重置或启用任务待重试", remaining))
 	}
 	return database.GetDB().Model(&model.NodeTraffic{}).Where("account_id = ?", account.Id).UpdateColumns(map[string]interface{}{"up": 0, "down": 0}).Error
 }
@@ -374,7 +399,7 @@ func (s *ServerManagementService) MaybeMonthlyReset() error {
 	var accounts []model.Inbound
 	var nodes []model.ManagedNode
 	if err = database.GetDB().Where("monthly_reset = ?", true).Find(&accounts).Error; err == nil {
-		err = database.GetDB().Where("enabled = ?", true).Find(&nodes).Error
+		err = database.GetDB().Find(&nodes).Error
 	}
 	if err == nil {
 		err = database.GetDB().Transaction(func(tx *gorm.DB) error {
@@ -399,16 +424,10 @@ func (s *ServerManagementService) MaybeMonthlyReset() error {
 	if err != nil {
 		return err
 	}
-	if err := s.DispatchPending(); err != nil {
-		return err
-	}
-	var remaining int64
-	if err := database.GetDB().Model(&model.SyncTask{}).Where("kind = ? AND status = ? AND operation_id LIKE ?", "reset", "pending", fmt.Sprintf("reset-%d-%%", period)).Count(&remaining).Error; err != nil {
-		return err
-	}
-	if remaining > 0 {
-		return fmt.Errorf("仍有 %d 个被控端月度重置任务待完成", remaining)
-	}
+	// Failed nodes stay in the retry queue. Archive the successful snapshots now
+	// so one unavailable node cannot hold the entire billing month open. A late
+	// successful reset updates this archive in DispatchPending.
+	_ = s.DispatchPending()
 	return database.GetDB().Transaction(func(tx *gorm.DB) error {
 		for _, in := range accounts {
 			var snapshots []model.NodeTrafficSnapshot
@@ -461,60 +480,77 @@ func (s *ServerManagementService) TrafficResetSnapshots(inboundID int) (*entity.
 	if err := query.Order("yyyymm DESC, port").Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	// 启用节点列表：节点名称作为快照表格的动态列（顺序稳定），并用于按节点填充分组用量。
+	// Historical names remain visible after a node is renamed or removed.
 	allNodes, err := s.Nodes()
 	if err != nil {
 		return nil, err
 	}
-	enabledNames := make([]string, 0, len(allNodes))
 	nodeNameByID := make(map[int]string, len(allNodes))
 	for _, node := range allNodes {
-		if !node.Enabled {
-			continue
-		}
-		enabledNames = append(enabledNames, node.Name)
 		nodeNameByID[node.Id] = node.Name
 	}
-	// 汇总所有留档行的月份，一次取出这些月份的被控端节点级留档，按 账号->节点 聚合。
 	months := make([]int, 0, len(rows))
+	accounts := make([]int, 0, len(rows))
 	seenMonth := make(map[int]bool, len(rows))
+	seenAccount := make(map[int]bool, len(rows))
 	for _, row := range rows {
 		if !seenMonth[row.Yyyymm] {
 			seenMonth[row.Yyyymm] = true
 			months = append(months, row.Yyyymm)
 		}
+		if !seenAccount[row.InboundId] {
+			seenAccount[row.InboundId] = true
+			accounts = append(accounts, row.InboundId)
+		}
 	}
-	nodeSnapByAccount := make(map[int]map[int]int64) // accountID -> nodeID -> up+down
+	type snapshotKey struct{ month, account, node int }
+	usage := make(map[snapshotKey]int64)
+	labels := make(map[snapshotKey]string)
+	columnSet := make(map[string]bool)
 	if len(months) > 0 {
 		var nodeSnaps []model.NodeTrafficSnapshot
-		if err := database.GetDB().Where("yyyymm IN ?", months).Find(&nodeSnaps).Error; err != nil {
+		if err := database.GetDB().Where("yyyymm IN ? AND account_id IN ?", months, accounts).Find(&nodeSnaps).Error; err != nil {
 			return nil, err
 		}
 		for _, snap := range nodeSnaps {
-			if nodeSnapByAccount[snap.AccountID] == nil {
-				nodeSnapByAccount[snap.AccountID] = make(map[int]int64)
+			key := snapshotKey{snap.Yyyymm, snap.AccountID, snap.NodeID}
+			name := snap.NodeName
+			if name == "" {
+				name = nodeNameByID[snap.NodeID]
 			}
-			nodeSnapByAccount[snap.AccountID][snap.NodeID] += snap.Up + snap.Down
+			if name == "" {
+				name = "节点"
+			}
+			label := fmt.Sprintf("%s (#%d)", name, snap.NodeID)
+			usage[key] += snap.Up + snap.Down
+			labels[key] = label
+			columnSet[label] = true
 		}
 	}
+	columns := make([]string, 0, len(columnSet))
+	for label := range columnSet {
+		columns = append(columns, label)
+	}
+	sort.Strings(columns)
 	out := make([]*entity.TrafficSnapshot, 0, len(rows))
 	for _, row := range rows {
 		local, remote := row.LocalUp+row.LocalDown, row.RemoteUp+row.RemoteDown
 		item := &entity.TrafficSnapshot{Yyyymm: row.Yyyymm, Period: YyyymmPeriod(row.Yyyymm), InboundId: row.InboundId, Port: row.Port, Remark: row.Remark, Local: local, Remote: remote, Used: local + remote, Limit: row.Total, LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(remote), UsedText: FormatTrafficSize(local + remote), LimitText: FormatTrafficLimit(row.Total), ResetAt: row.ResetAt}
-		perNode := nodeSnapByAccount[row.InboundId]
-		if len(perNode) > 0 {
-			item.NodeUsed = make(map[string]int64, len(enabledNames))
-			item.NodeUsedText = make(map[string]string, len(enabledNames))
-			for nodeID, name := range nodeNameByID {
-				if used, ok := perNode[nodeID]; ok {
-					item.NodeUsed[name] = used
-					item.NodeUsedText[name] = FormatTrafficSize(used)
-				}
+		for key, used := range usage {
+			if key.month != row.Yyyymm || key.account != row.InboundId {
+				continue
 			}
+			if item.NodeUsed == nil {
+				item.NodeUsed = make(map[string]int64)
+				item.NodeUsedText = make(map[string]string)
+			}
+			label := labels[key]
+			item.NodeUsed[label] = used
+			item.NodeUsedText[label] = FormatTrafficSize(used)
 		}
 		out = append(out, item)
 	}
-	return &entity.TrafficSnapshotPage{Nodes: enabledNames, Rows: out}, nil
+	return &entity.TrafficSnapshotPage{Nodes: columns, Rows: out}, nil
 }
 
 // RemoteInbounds reads every enabled node for subscription generation.

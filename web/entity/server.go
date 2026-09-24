@@ -67,7 +67,7 @@ type TrafficSnapshot struct {
 	UsedText   string `json:"usedText"`
 	LimitText  string `json:"limitText"`
 	ResetAt    int64  `json:"resetAt"`
-	// NodeUsed 是当月各启用被控端节点上的用量（上传+下载），key 为节点名称。
+	// NodeUsed 是当月各被控端节点上的用量（上传+下载），key 为历史节点名称及 ID。
 	// NodeUsedText 是 NodeUsed 对应换算后的展示文本；节点当月无留档时不存在对应键。
 	NodeUsed     map[string]int64  `json:"nodeUsed"`
 	NodeUsedText map[string]string `json:"nodeUsedText"`

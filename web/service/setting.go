@@ -1,8 +1,8 @@
 package service
 
 import (
-	_ "embed"
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"xui/database"
 	"xui/database/model"
@@ -25,6 +26,25 @@ import (
 
 //go:embed config.json
 var xrayTemplateConfig string
+
+var activePanelCert struct {
+	sync.RWMutex
+	fingerprint string
+	initialized bool
+}
+
+// SetActivePanelCertificate records the certificate loaded by the HTTPS listener.
+// Reading the file again would report a new certificate before the panel restarts.
+func SetActivePanelCertificate(der []byte) {
+	activePanelCert.Lock()
+	defer activePanelCert.Unlock()
+	activePanelCert.initialized = true
+	activePanelCert.fingerprint = ""
+	if len(der) > 0 {
+		sum := sha256.Sum256(der)
+		activePanelCert.fingerprint = hex.EncodeToString(sum[:])
+	}
+}
 
 var defaultValueMap = map[string]string{
 	"serverName":            "主服务器",
@@ -315,9 +335,23 @@ func (s *SettingService) AgentConnectionInfo() (*entity.AgentConnectionInfo, err
 		SubscribeUrl: "https://" + host,
 		Port:         port,
 		Token:        os.Getenv("XUI_AGENT_TOKEN"),
-		CertSha256:   s.selfCertFingerprint(),
+		CertSha256:   s.activeCertFingerprint(),
 	}
 	return info, nil
+}
+
+func (s *SettingService) activeCertFingerprint() string {
+	activePanelCert.RLock()
+	fingerprint := activePanelCert.fingerprint
+	initialized := activePanelCert.initialized
+	activePanelCert.RUnlock()
+	if initialized {
+		if fingerprint == "" {
+			return "-"
+		}
+		return fingerprint
+	}
+	return s.selfCertFingerprint()
 }
 
 // getListenHost 返回 webListen 设置；若为空，尝试返回本机非回环 IPv4 地址。

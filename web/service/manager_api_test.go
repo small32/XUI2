@@ -181,6 +181,9 @@ func TestManagerRetriesFailedNodeWithoutLosingOtherNode(t *testing.T) {
 		t.Fatalf("pending=%v err=%v", pending, err)
 	}
 	fail.Store(false)
+	if err := database.GetDB().Model(&model.SyncTask{}).Where("status = ?", "pending").Update("next_retry_at", 0).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := new(ServerManagementService).DispatchPending(); err != nil {
 		t.Fatal(err)
 	}

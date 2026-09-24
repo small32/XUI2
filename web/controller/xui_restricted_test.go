@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +11,8 @@ import (
 	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 
+	"xui/database"
+	"xui/database/model"
 	"xui/web/session"
 )
 
@@ -52,5 +55,51 @@ func TestRestrictedAccessAllowsTrafficSnapshots(t *testing.T) {
 		if passed := strings.TrimSpace(w.Body.String()) == "ok"; passed != cs.wantPassed {
 			t.Fatalf("%s 放行=%v，期望 %v：%s", cs.path, passed, cs.wantPassed, w.Body.String())
 		}
+	}
+}
+
+func TestRestrictedTrafficSessionExpiresAfterPasswordChange(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	if err := database.InitDB(filepath.Join(t.TempDir(), "sessions.db")); err != nil {
+		t.Fatal(err)
+	}
+	in := model.Inbound{Port: 43339, Protocol: model.Trojan, Settings: `{"clients":[{"password":"old-secret"}]}`, StreamSettings: `{}`, Sniffing: `{}`, Tag: "inbound-43339"}
+	if err := database.GetDB().Create(&in).Error; err != nil {
+		t.Fatal(err)
+	}
+	engine := gin.New()
+	engine.Use(sessions.Sessions("session", cookie.NewStore([]byte("test-secret"))))
+	engine.Use(func(c *gin.Context) { c.Set("base_path", "/"); c.Next() })
+	engine.GET("/test-login", func(c *gin.Context) {
+		if err := session.SetRestrictedLogin(c, in.Id, "old-secret"); err != nil {
+			t.Fatal(err)
+		}
+		c.String(200, "ok")
+	})
+	g := engine.Group("/xui")
+	g.Use((&BaseController{}).checkLogin, (&XUIController{}).checkRestricted)
+	g.POST("/traffic-summary/list", func(c *gin.Context) { c.String(200, "allowed") })
+	login := httptest.NewRecorder()
+	engine.ServeHTTP(login, httptest.NewRequest(http.MethodGet, "/test-login", nil))
+	cookies := login.Result().Cookies()
+	if len(cookies) == 0 {
+		t.Fatal("restricted session cookie missing")
+	}
+	request := func() string {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "/xui/traffic-summary/list", nil)
+		r.AddCookie(cookies[0])
+		r.Header.Set("X-Requested-With", "XMLHttpRequest")
+		engine.ServeHTTP(w, r)
+		return w.Body.String()
+	}
+	if got := request(); got != "allowed" {
+		t.Fatalf("valid restricted session was blocked: %s", got)
+	}
+	if err := database.GetDB().Model(&in).Update("settings", `{"clients":[{"password":"new-secret"}]}`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got := request(); got == "allowed" {
+		t.Fatal("old session still accessed traffic after password change")
 	}
 }

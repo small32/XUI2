@@ -36,7 +36,7 @@ func TestSettingAgentConnectionInfo(t *testing.T) {
 	base := gin.H{"title": "设置", "request_uri": "/xui/setting", "base_path": "/", "cur_ver": "0.0.0"}
 
 	agent := renderTpl(t, "setting.html", mergeData(base, gin.H{"role": "agent"}))
-	for _, want := range []string{"对外主机名", "被控端连接信息", "externalHost", "loadConnInfo"} {
+	for _, want := range []string{"对外主机名", "被控端连接信息", "externalHost", "loadConnInfo", "刷新指纹", "refreshFingerprint"} {
 		if !strings.Contains(agent, want) {
 			t.Fatalf("agent 设置页应包含 %q", want)
 		}

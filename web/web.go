@@ -330,11 +330,14 @@ func (s *Server) Start() (err error) {
 			listener.Close()
 			return err
 		}
+		service.SetActivePanelCertificate(cert.Certificate[0])
 		c := &tls.Config{
 			Certificates: []tls.Certificate{cert},
 		}
 		listener = network.NewAutoHttpsListener(listener)
 		listener = tls.NewListener(listener, c)
+	} else {
+		service.SetActivePanelCertificate(nil)
 	}
 
 	if certFile != "" || keyFile != "" {
@@ -364,10 +367,10 @@ const (
 )
 
 // resolvePanelCert 每次启动重新识别一次面板证书：
-// 1) 优先 /root/cert 下由一键申请生成的可信证书，识别到就回填设置，
-//    设置页据此显示实际生效的路径；
-// 2) 识别不到时沿用设置中的证书，通常是安装脚本生成的自签证书；
-// 3) 设置中的路径已不可用（例如证书被删）时退回自签证书，避免面板起不来。
+//  1. 优先 /root/cert 下由一键申请生成的可信证书，识别到就回填设置，
+//     设置页据此显示实际生效的路径；
+//  2. 识别不到时沿用设置中的证书，通常是安装脚本生成的自签证书；
+//  3. 设置中的路径已不可用（例如证书被删）时退回自签证书，避免面板起不来。
 func (s *Server) resolvePanelCert() (string, string, error) {
 	if certFile, keyFile := discoverRootCert(); canUseCertPair(certFile, keyFile) {
 		logger.Info("auto-using cert from /root/cert: ", certFile, " / ", keyFile)

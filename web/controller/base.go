@@ -3,6 +3,7 @@ package controller
 import (
 	"github.com/gin-gonic/gin"
 	"net/http"
+	"xui/web/service"
 	"xui/web/session"
 )
 
@@ -13,7 +14,16 @@ type BaseController struct {
 // 受限登录不建立占位用户（IsRestricted 为真、IsLogin 为假），由后续的
 // checkRestricted 白名单进一步限定其可访问范围。
 func (a *BaseController) checkLogin(c *gin.Context) {
-	if !session.IsLogin(c) && !session.IsRestricted(c) {
+	valid := session.IsLogin(c)
+	if !valid && session.IsRestricted(c) {
+		inboundID := session.GetLoginInboundId(c)
+		password, ok := new(service.InboundService).GetInboundPassword(inboundID)
+		valid = ok && session.IsRestrictedCredValid(c, inboundID, password)
+		if !valid {
+			session.ClearSession(c)
+		}
+	}
+	if !valid {
 		if isAjax(c) {
 			pureJsonMsg(c, false, "登录时效已过，请重新登录")
 		} else {

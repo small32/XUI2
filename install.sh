@@ -166,7 +166,25 @@ configure_role() {
         chmod 600 /etc/xui/panel.key
         chmod 644 /etc/xui/panel.crt
     fi
-    /usr/local/xui/xui setting -cert /etc/xui/panel.crt -key /etc/xui/panel.key || return 1
+    # Reuse an actual certificate/key pair from /root/cert on every install
+    # and upgrade. A stale .cer or unrelated .key must not replace the panel
+    # certificate; only then fall back to the generated self-signed pair.
+    local panel_cert="/etc/xui/panel.crt" panel_key="/etc/xui/panel.key"
+    local candidate_cert candidate_key cert_pub key_pub
+    for candidate_cert in /root/cert/fullchain.cer /root/cert/*.cer; do
+        [[ -f "$candidate_cert" ]] || continue
+        cert_pub=$( (set -o pipefail; openssl x509 -in "$candidate_cert" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum) 2>/dev/null) || continue
+        for candidate_key in "${candidate_cert%.cer}.key" /root/cert/*.key; do
+            [[ -f "$candidate_key" ]] || continue
+            key_pub=$( (set -o pipefail; openssl pkey -in "$candidate_key" -pubout -outform DER | sha256sum) 2>/dev/null) || continue
+            if [[ "$cert_pub" == "$key_pub" ]]; then
+                panel_cert="$candidate_cert"
+                panel_key="$candidate_key"
+                break 2
+            fi
+        done
+    done
+    /usr/local/xui/xui setting -cert "$panel_cert" -key "$panel_key" || return 1
     if [[ "$XUI_ROLE" != agent ]]; then return 0; fi
     echo "被控端 API 令牌（请复制到管理端，仅管理员可见）："
     sed -n 's/^XUI_AGENT_TOKEN=//p' /etc/xui/agent.env

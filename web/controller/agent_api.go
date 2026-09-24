@@ -250,6 +250,10 @@ func (a *AgentAPI) disable(c *gin.Context) {
 		apiError(c, result.Error)
 		return
 	}
+	if result.RowsAffected != 1 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
+		return
+	}
 	if err := service.ApplyManagedXray(); err != nil {
 		apiError(c, err)
 		return

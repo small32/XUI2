@@ -55,7 +55,10 @@
                                     <span>[[showToken ? connInfo.token : '************']]</span>
                                     <a-button v-if="connInfo.token" type="link" size="small" @click="showToken=!showToken">[[showToken?'隐藏':'显示']]</a-button>
                                 </a-descriptions-item>
-                                <a-descriptions-item label="证书 SHA256 指纹">[[connInfo.certSha256||'-']]</a-descriptions-item>
+                                <a-descriptions-item label="证书 SHA256 指纹">
+                                    <span>[[connInfo.certSha256||'-']]</span>
+                                    <a-button type="link" size="small" :loading="refreshingFingerprint" @click="refreshFingerprint">刷新指纹</a-button>
+                                </a-descriptions-item>
                             </a-descriptions>
                             {{end}}
                         </a-tab-pane>
@@ -113,6 +116,7 @@
             user: {},
             connInfo: null,
             showToken: false,
+            refreshingFingerprint: false,
         },
         methods: {
             loading(spinning = true) {
@@ -132,6 +136,20 @@
                 const msg = await HttpUtil.post("/xui/setting/connectionInfo");
                 if (msg.success) {
                     this.connInfo = msg.obj || null;
+                }
+            },
+            async refreshFingerprint() {
+                this.refreshingFingerprint = true;
+                try {
+                    const msg = await HttpUtil.post("/xui/setting/connectionInfo");
+                    if (msg.success) {
+                        this.connInfo = msg.obj || null;
+                        this.$message.success('已重新读取当前面板证书指纹');
+                    } else {
+                        this.$message.error(msg.msg || '读取指纹失败');
+                    }
+                } finally {
+                    this.refreshingFingerprint = false;
                 }
             },
             async updateAllSetting() {
