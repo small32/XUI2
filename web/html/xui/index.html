@@ -72,7 +72,7 @@
                             <a-tag :color="status.xray.color">[[ status.xray.state ]]</a-tag>
                             <a-tooltip v-if="status.xray.state === State.Error">
                                 <template slot="title">
-                                    <p v-for="line in status.xray.errorMsg.split('\n')">[[ line ]]</p>
+                                    <p v-for="line in (status.xray.errorMsg || '').split('\n').filter(l => l)">[[ line ]]</p>
                                 </template>
                                 <a-icon type="question-circle" theme="filled"></a-icon>
                             </a-tooltip>

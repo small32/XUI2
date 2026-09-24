@@ -150,7 +150,7 @@ func (s *ServerManagementService) Traffic() ([]*entity.ServerTraffic, error) {
 			failures = append(failures, err)
 		}
 	}
-	traffic, err := s.GetTrafficCache()
+	traffic, err := s.getTrafficCache()
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +161,15 @@ func (s *ServerManagementService) Traffic() ([]*entity.ServerTraffic, error) {
 }
 
 func (s *ServerManagementService) GetTrafficCache() ([]*entity.ServerTraffic, error) {
+	// HTTP 读路径不持写锁（写路径 Traffic/ResetAccountTraffic/MaybeMonthlyReset
+	// 都持 trafficMu），这里单独加读锁，避免与 NodeTraffic 的 delete+recreate
+	// 清零并发。内部调用（Traffic/enforceLimits 已持锁）走 getTrafficCache。
+	trafficMu.Lock()
+	defer trafficMu.Unlock()
+	return s.getTrafficCache()
+}
+
+func (s *ServerManagementService) getTrafficCache() ([]*entity.ServerTraffic, error) {
 	var accounts []model.Inbound
 	if err := database.GetDB().Find(&accounts).Error; err != nil {
 		return nil, err
@@ -238,6 +247,9 @@ func (s *ServerManagementService) ResetAccountTraffic(id int) error {
 	}); err != nil {
 		return err
 	}
+	// 两次 DispatchPending 是必要的：manual reset 时会同时入队 reset 与 enable，
+	// 而派发查询的 NOT EXISTS 屏障会先排除“同账号仍有更早 pending 任务”的 enable，
+	// 需等首轮 reset 完成后，第二轮才能越过屏障派发 enable。两次调用幂等，不会重复远程操作。
 	dispatchErr := s.DispatchPending()
 	if err := s.DispatchPending(); err != nil {
 		dispatchErr = errors.Join(dispatchErr, err)
@@ -255,7 +267,14 @@ func (s *ServerManagementService) ResetAccountTraffic(id int) error {
 }
 
 func (s *ServerManagementService) Summary(inboundID int) ([]*entity.TrafficSummary, error) {
-	remote, err := s.GetTrafficCache()
+	// 对外读入口加锁，与写路径互斥；内部（enforceLimits 于 Traffic 持锁内调用）走 summary。
+	trafficMu.Lock()
+	defer trafficMu.Unlock()
+	return s.summary(inboundID)
+}
+
+func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSummary, error) {
+	remote, err := s.getTrafficCache()
 	if err != nil {
 		return nil, err
 	}
@@ -318,7 +337,7 @@ func (s *ServerManagementService) Summary(inboundID int) ([]*entity.TrafficSumma
 			status = "unknown"
 		}
 		out = append(out, &entity.TrafficSummary{InboundId: in.Id, Username: in.Remark, Port: in.Port,
-			Local: local, Remote: used, Total: local + used, Limit: in.Total, Enable: enabled,
+			Local: local, Remote: used, Total: local + used, Limit: in.Total, ExpiryTime: in.ExpiryTime, Enable: enabled,
 			MonthlyReset: in.MonthlyReset, Overlimit: over, Status: status,
 			LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(local + used), LimitText: FormatTrafficLimit(in.Total)})
 	}
@@ -330,7 +349,7 @@ func (s *ServerManagementService) enforceLimits() error {
 	if err != nil {
 		return err
 	}
-	rows, err := s.Summary(0)
+	rows, err := s.summary(0)
 	if err != nil {
 		return err
 	}

@@ -34,6 +34,7 @@ type TrafficSummary struct {
 	Remote    int64  `json:"remote"`
 	Total     int64  `json:"total"`
 	Limit     int64  `json:"limit"`
+	ExpiryTime int64 `json:"expiryTime"`
 	Enable    bool   `json:"enable"`
 	// MonthlyReset 对应入站的“按月计算”开关：勾选的账号按月清零、按月留档；
 	// 未勾选的累计计费，流量用完即止。Limit 为 0 时两种模式都不限量。

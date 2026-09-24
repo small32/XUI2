@@ -138,6 +138,11 @@ class DateUtil {
         return moment(millis).format('YYYY-M-D H:m:s')
     }
 
+    // 到期时间按日展示
+    static formatDateMillis(millis) {
+        return moment(millis).format('YYYY-M-D')
+    }
+
     static firstDayOfMonth() {
         const date = new Date();
         date.setDate(1);

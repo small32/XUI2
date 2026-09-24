@@ -97,11 +97,11 @@
                             <template slot="settings" slot-scope="text, dbInbound">
                                 <a-button type="link" @click="showInfo(dbInbound)">查看</a-button>
                             </template>
-                            <template slot="stream" slot-scope="text, dbInbound, index">
+                            <template slot="stream" slot-scope="text, dbInbound">
                                 <template v-if="dbInbound.isVMess || dbInbound.isVLess || dbInbound.isTrojan || dbInbound.isSS">
-                                    <a-tag color="green">[[ inbounds[index].stream.network ]]</a-tag>
-                                    <a-tag v-if="inbounds[index].stream.isTls" color="blue">tls</a-tag>
-                                    <a-tag v-if="inbounds[index].stream.isXTls" color="blue">xtls</a-tag>
+                                    <a-tag color="green">[[ dbInbound.streamView.network ]]</a-tag>
+                                    <a-tag v-if="dbInbound.streamView.isTls" color="blue">tls</a-tag>
+                                    <a-tag v-if="dbInbound.streamView.isXTls" color="blue">xtls</a-tag>
                                 </template>
                                 <template v-else>无</template>
                             </template>
@@ -111,11 +111,15 @@
                             <template slot="expiryTime" slot-scope="text, dbInbound">
                                 <template v-if="dbInbound.expiryTime > 0">
                                     <a-tag v-if="dbInbound.isExpiry" color="red">
-                                        [[ DateUtil.formatMillis(dbInbound.expiryTime) ]]
+                                        [[ DateUtil.formatDateMillis(dbInbound.expiryTime) ]]
                                     </a-tag>
                                     <a-tag v-else color="blue">
-                                        [[ DateUtil.formatMillis(dbInbound.expiryTime) ]]
+                                        [[ DateUtil.formatDateMillis(dbInbound.expiryTime) ]]
                                     </a-tag>
+                                    <a-tooltip>
+                                        <template slot="title">截止到当日 23:59:59</template>
+                                        <a-icon type="question-circle"></a-icon>
+                                    </a-tooltip>
                                 </template>
                                 <a-tag v-else color="green">无限期</a-tag>
                             </template>

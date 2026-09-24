@@ -21,6 +21,16 @@
                     <a-table-column title="端口" data-index="port"></a-table-column>
                     <a-table-column title="总流量" data-index="totalText"></a-table-column>
                     <a-table-column title="流量限制" data-index="limitText"></a-table-column>
+                    <a-table-column title="到期时间">
+                        <template slot-scope="text,row">
+                            <span v-if="row.expiryTime>0">[[ DateUtil.formatDateMillis(row.expiryTime) ]]</span>
+                            <span v-else>无限期</span>
+                            <a-tooltip>
+                                <template slot="title">截止到当日 23:59:59</template>
+                                <a-icon type="question-circle"></a-icon>
+                            </a-tooltip>
+                        </template>
+                    </a-table-column>
                     <a-table-column title="计费方式">
                         <template slot-scope="text,row">
                             <a-tag v-if="row.monthlyReset" color="blue">按月</a-tag>

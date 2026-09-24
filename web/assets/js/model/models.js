@@ -106,12 +106,35 @@ class DBInbound {
         if (t == null) {
             this.expiryTime = 0;
         } else {
-            this.expiryTime = t.valueOf();
+            // 到期按日计：界面只选日期，保存为该日 23:59:59 截止
+            this.expiryTime = moment(t).endOf('day').valueOf();
         }
     }
 
     get isExpiry() {
         return this.expiryTime < new Date().getTime();
+    }
+
+    // streamView 从 streamSettings 解析出“传输配置”列需要的摘要项。
+    // 解析结果缓存一次，避免列模板每次渲染都重复 JSON.parse。
+    get streamView() {
+        if (this._streamView === undefined) {
+            let view = { network: 'tcp', isTls: false, isXTls: false };
+            if (!ObjectUtil.isEmpty(this.streamSettings)) {
+                try {
+                    const s = JSON.parse(this.streamSettings);
+                    view = {
+                        network: s.network || 'tcp',
+                        isTls: s.security === 'tls',
+                        isXTls: s.security === 'xtls',
+                    };
+                } catch (e) {
+                    view = { network: 'tcp', isTls: false, isXTls: false };
+                }
+            }
+            this._streamView = view;
+        }
+        return this._streamView;
     }
 
     toInbound() {

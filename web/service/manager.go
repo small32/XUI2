@@ -459,7 +459,9 @@ func enqueue(tx *gorm.DB, nodeID int, inbound *model.Inbound, kind, operation st
 		}
 		for _, task := range pending {
 			if err := tx.Model(&task).Updates(map[string]interface{}{
-				"port": inbound.Port, "payload": string(payload), "error": "", "attempts": 0, "next_retry_at": 0,
+				// 刷新负载但不重置 attempts：否则失败计数每次配置变更都被清零，
+				// 持续故障的节点永远不会到达 syncMaxRetries 被标记 abandoned。
+				"port": inbound.Port, "payload": string(payload), "error": "", "next_retry_at": 0,
 			}).Error; err != nil {
 				return err
 			}
