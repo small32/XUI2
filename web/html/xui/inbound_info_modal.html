@@ -3,7 +3,14 @@
 <a-modal id="inbound-info-modal" v-model="infoModal.visible" title="详细信息" @ok="infoModal.ok"
          :closable="true" :mask-closable="true"
          ok-text="复制链接" cancel-text='{{ call $.i18n "close" }}' :ok-button-props="infoModal.okBtnPros">
-    <inbound-info :db-inbound="dbInbound" :inbound="inbound"></inbound-info>
+    <template v-if="infoModal.nodeInfos.length">
+        <div v-for="(ni, i) in infoModal.nodeInfos" :key="i">
+            <a-divider v-if="i > 0"></a-divider>
+            <p v-if="infoModal.nodeInfos.length > 1"><a-tag color="blue">节点：[[ ni.name ]]</a-tag></p>
+            <inbound-info :db-inbound="ni.dbInbound" :inbound="ni.inbound"></inbound-info>
+        </div>
+    </template>
+    <inbound-info v-else :db-inbound="dbInbound" :inbound="inbound"></inbound-info>
 </a-modal>
 <script>
 
@@ -11,6 +18,8 @@
         visible: false,
         inbound: new Inbound(),
         dbInbound: new DBInbound(),
+        // manager 端每台被控端一份配置；非 manager 时仅本机一份。
+        nodeInfos: [],
         okBtnPros: {
             attrs: {
                 id: "inbound-info-modal-ok-btn",
@@ -20,13 +29,30 @@
         show(dbInbound) {
             this.inbound = dbInbound.toInbound();
             this.dbInbound = new DBInbound(dbInbound);
+            this.nodeInfos = [];
             this.visible = true;
+
+            if (role === 'manager') {
+                this.fillNodeInfos(dbInbound);
+            } else {
+                this.nodeInfos = [{ name: this.dbInbound.remark, dbInbound: this.dbInbound, inbound: this.inbound }];
+            }
 
             if (dbInbound.hasLink()) {
                 this.okBtnPros.attrs.style = "";
             } else {
                 this.okBtnPros.attrs.style = "display: none";
             }
+        },
+        // 每台被控端一行配置：地址取被控端自己的订阅地址，而非管理端。
+        async fillNodeInfos(dbInbound) {
+            const remoteObjects = await app.loadRemoteInbounds(dbInbound);
+            if (!remoteObjects) return;
+            const infos = remoteObjects.map(ro => {
+                const d = new DBInbound(ro);
+                return { name: (ro.remoteName || '').trim() || dbInbound.remark, dbInbound: d, inbound: d.toInbound() };
+            });
+            this.nodeInfos = infos.length ? infos : [{ name: dbInbound.remark, dbInbound: this.dbInbound, inbound: this.inbound }];
         },
         async ok() {
             const text = await this.linkText();
