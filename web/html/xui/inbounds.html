@@ -55,7 +55,7 @@
                         </a-checkbox-group>
                         <a-table :columns="columns" :row-key="dbInbound => dbInbound.id"
                                  :data-source="visibleInbounds"
-                                 :loading="spinning" :scroll="{ x: 1500 }"
+                                 :loading="spinning" :scroll="{ x: 1100 }" size="small"
                                  :pagination="false"
                                  style="margin-top: 20px"
                                  @change="() => getDBInbounds()">
@@ -92,14 +92,6 @@
                             </template>
                             <template slot="settings" slot-scope="text, dbInbound">
                                 <a-button type="link" @click="showInfo(dbInbound)">查看</a-button>
-                            </template>
-                            <template slot="stream" slot-scope="text, dbInbound">
-                                <template v-if="dbInbound.isVMess || dbInbound.isVLess || dbInbound.isTrojan || dbInbound.isSS">
-                                    <a-tag color="green">[[ dbInbound.streamView.network ]]</a-tag>
-                                    <a-tag v-if="dbInbound.streamView.isTls" color="blue">tls</a-tag>
-                                    <a-tag v-if="dbInbound.streamView.isXTls" color="blue">xtls</a-tag>
-                                </template>
-                                <template v-else>无</template>
                             </template>
                             <template slot="enable" slot-scope="text, dbInbound">
                                 <a-switch v-model="dbInbound.enable" :disabled="restricted" @change="switchEnable(dbInbound)"></a-switch>
@@ -169,7 +161,7 @@
     }, {
         title: "备注",
         align: 'center',
-        width: 100,
+        width: 80,
         dataIndex: "remark",
     }, {
         title: "协议",
@@ -192,14 +184,9 @@
         width: 40,
         scopedSlots: { customRender: 'settings' },
     }, {
-        title: "传输配置",
-        align: 'center',
-        width: 60,
-        scopedSlots: { customRender: 'stream' },
-    }, {
         title: "到期时间",
         align: 'center',
-        width: 80,
+        width: 70,
         scopedSlots: { customRender: 'expiryTime' },
     }];
 
