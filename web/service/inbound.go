@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 	"xui/database"
 	"xui/database/model"
@@ -47,6 +48,24 @@ func (s *InboundService) checkPortExist(port int, ignoreId int) (bool, error) {
 		return false, err
 	}
 	return count > 0, nil
+}
+
+// CheckInboundRemark 校验入站用户名（remark）是否与面板管理员账号重名。
+// 登录流程先校验管理员、失败后再按 remark 匹配入站完成受限登录，
+// 重名会让受限账号顶着管理员用户名登录，因此禁止使用。
+func (s *InboundService) CheckInboundRemark(remark string) error {
+	remark = strings.TrimSpace(remark)
+	if remark == "" {
+		return nil
+	}
+	var count int64
+	if err := database.GetDB().Model(model.User{}).Where("username = ?", remark).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return common.NewErrorf("非法的用户名")
+	}
+	return nil
 }
 
 func (s *InboundService) AddInbound(inbound *model.Inbound) error {

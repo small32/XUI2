@@ -160,6 +160,10 @@ func (a *InboundController) addInbound(c *gin.Context) {
 		jsonMsg(c, "添加", err)
 		return
 	}
+	if err = a.inboundService.CheckInboundRemark(inbound.Remark); err != nil {
+		jsonMsg(c, "添加", err)
+		return
+	}
 	user := session.GetLoginUser(c)
 	inbound.UserId = user.Id
 	inbound.Enable = true
@@ -247,6 +251,10 @@ func (a *InboundController) updateInbound(c *gin.Context) {
 	old, getErr := a.inboundService.GetInbound(id)
 	if getErr != nil {
 		jsonMsg(c, "修改", getErr)
+		return
+	}
+	if err = a.inboundService.CheckInboundRemark(inbound.Remark); err != nil {
+		jsonMsg(c, "修改", err)
 		return
 	}
 	oldPort := old.Port
