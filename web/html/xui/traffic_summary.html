@@ -19,7 +19,7 @@
                 <a-table :data-source="visibleRows" :pagination="false" row-key="port">
                     <a-table-column title="用户名" data-index="username"></a-table-column>
                     <a-table-column title="端口" data-index="port"></a-table-column>
-                    <a-table-column title="总流量" data-index="totalText"></a-table-column>
+                    <a-table-column title="消耗流量" data-index="totalText"></a-table-column>
                     <a-table-column title="流量限制" data-index="limitText"></a-table-column>
                     <a-table-column title="到期时间">
                         <template slot-scope="text,row">
@@ -54,7 +54,7 @@
                 </a-table>
                 <a-modal v-model="nodesModal.visible" :title="nodesModal.title" :footer="null" width="820px">
                     <a-table :data-source="nodesModal.rows" row-key="nodeId" :pagination="false" size="small">
-                        <a-table-column title="被控端" data-index="name"></a-table-column>
+                        <a-table-column title="节点" data-index="name"></a-table-column>
                         <a-table-column title="实际端口" data-index="remotePort"></a-table-column>
                         <a-table-column title="上传" ><template slot-scope="text,row">[[sizeFormat(row.up)]]</template></a-table-column>
                         <a-table-column title="下载" ><template slot-scope="text,row">[[sizeFormat(row.down)]]</template></a-table-column>
@@ -133,11 +133,11 @@
                 this.snapshotModal.loading = false;
                 if (m.success) {
                     const page = m.obj || {nodes: [], rows: []};
-                    // 动态列：月份 / 总流量 / 历史被控端节点 / 当月流量限制。
+                    // 动态列：月份 / 消耗流量 / 历史被控端节点 / 当月流量限制。
                     // 节点列名取留档时的名称和 ID，当月无留档显示 "-"。
                     this.snapshotModal.columns = [
                         {title: '月份', dataIndex: 'period'},
-                        {title: '总流量', dataIndex: 'usedText'},
+                        {title: '消耗流量', dataIndex: 'usedText'},
                         ...(page.nodes || []).map(n => ({
                             title: n,
                             key: 'node_' + n,
