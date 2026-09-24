@@ -136,10 +136,18 @@ func inboundRevision(in *model.Inbound) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// hostOnlyAddress 去掉订阅地址里的端口：客户端连接用的端口由各入站自己决定，
-// 生成链接时会另拼 ":入站端口"，地址带端口会拼成 host:port:port 这类非法地址。
+// hostOnlyAddress 把订阅地址归一成纯主机名：去掉 http:// / https:// 协议前缀、
+// 路径与端口。客户端连接用的端口由各入站自己决定，生成链接时会另拼 ":入站端口"，
+// 地址带端口会拼成 host:port:port 这类非法地址。
+// 值可能来自被控端面板或浏览器地址栏，两者都容易带上协议前缀，这里一并剥掉。
 func hostOnlyAddress(address string) string {
 	address = strings.TrimSpace(address)
+	if i := strings.Index(address, "://"); i >= 0 {
+		address = address[i+3:]
+	}
+	if i := strings.IndexAny(address, "/?#"); i >= 0 {
+		address = address[:i]
+	}
 	i := strings.LastIndex(address, ":")
 	if i <= 0 || strings.Contains(address[:i], ":") {
 		return address

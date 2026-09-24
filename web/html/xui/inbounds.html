@@ -397,15 +397,19 @@
                 if (!links.length) { this.$message.error('无法生成当前入站的节点链接'); return null; }
                 return links;
             },
-            async showQrcode(dbInbound) {
-                if (!dbInbound.hasLink()) return;
+            async inboundLinks(dbInbound) {
+                // 被控端面板没有节点列表接口，本机入站就是唯一来源，直接用本地链接；
+                // 管理端（含受限登录）按每台已启用被控端分别取数，地址用各自的订阅地址。
                 if (role !== 'manager') {
-                    qrModal.show('二维码', [{ name: '', content: dbInbound.genLink() }]);
-                    return;
+                    return [{ name: '', content: dbInbound.genLink() }];
                 }
                 const remoteObjects = await this.loadRemoteInbounds(dbInbound);
-                if (!remoteObjects) return;
-                const links = this.nodeLinks(remoteObjects);
+                if (!remoteObjects) return null;
+                return this.nodeLinks(remoteObjects);
+            },
+            async showQrcode(dbInbound) {
+                if (!dbInbound.hasLink()) return;
+                const links = await this.inboundLinks(dbInbound);
                 if (!links) return;
                 qrModal.show('二维码', links);
             },
@@ -419,9 +423,7 @@
             },
             async showClashSubscription(dbInbound) {
                 if (!dbInbound.hasLink()) return;
-                const remoteObjects = await this.loadRemoteInbounds(dbInbound);
-                if (!remoteObjects) return;
-                const links = this.nodeLinks(remoteObjects);
+                const links = await this.inboundLinks(dbInbound);
                 if (!links) return;
                 this.subscriptionNodes = links.map(item => item.content).join('|');
                 this.updateSubscriptionUrl();

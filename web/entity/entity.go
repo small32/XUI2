@@ -72,6 +72,12 @@ func (s *AllSetting) CheckValid() error {
 		s.WebBasePath += "/"
 	}
 
+	// 对外主机名/域名只接受纯主机名：协议前缀（http://、https://）、端口号（:）
+	// 与路径（/）都会被面板按角色重复拼接成完整地址，这里直接拒绝。
+	if host := strings.TrimSpace(s.ExternalHost); host != "" && strings.ContainsAny(host, "/:") {
+		return common.NewErrorf("对外主机名/域名不能包含协议前缀、端口号或路径: %v", s.ExternalHost)
+	}
+
 	xrayConfig := &xray.Config{}
 	err := json.Unmarshal([]byte(s.XrayTemplateConfig), xrayConfig)
 	if err != nil {

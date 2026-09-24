@@ -324,15 +324,16 @@ func (s *SettingService) AgentConnectionInfo() (*entity.AgentConnectionInfo, err
 		}
 	}
 	host = strings.TrimSpace(host)
-	// 展示给管理端填写的 API 地址为站点根（不含 /api/v1，管理端会自行拼接该路径），
-	// 订阅地址只保留主机名（不带 Web 端口）。
+	// 展示给管理端填写的 API 地址为站点根（不含 /api/v1，管理端会自行拼接该路径）。
+	// 订阅地址是要填进管理端的节点主机名，必须只给纯主机名：带 http(s):// 前缀会被
+	// 原样粘进管理端并拼成非法节点地址（如 trojan://pass@https://host:443）。
 	api := "https://" + host
 	if port != 0 {
 		api += ":" + strconv.Itoa(port)
 	}
 	info := &entity.AgentConnectionInfo{
 		ApiUrl:       api,
-		SubscribeUrl: "https://" + host,
+		SubscribeUrl: host,
 		Port:         port,
 		Token:        os.Getenv("XUI_AGENT_TOKEN"),
 		CertSha256:   s.activeCertFingerprint(),
