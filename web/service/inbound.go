@@ -50,13 +50,24 @@ func (s *InboundService) checkPortExist(port int, ignoreId int) (bool, error) {
 	return count > 0, nil
 }
 
-// CheckInboundRemark 校验入站用户名（remark）是否与面板管理员账号重名。
+// reservedRemarks 入站用户名禁用词：面板与系统里常见的默认管理员名，
+// 受限账号（凭入站用户名+入站密码登录）用它们容易冒充管理员身份。
+var reservedRemarks = map[string]bool{
+	"root":  true,
+	"admin": true,
+}
+
+// CheckInboundRemark 校验入站用户名（remark）是否可用：不得与面板管理员账号重名，
+// 也不得使用 root / admin 这类保留名（不区分大小写）。
 // 登录流程先校验管理员、失败后再按 remark 匹配入站完成受限登录，
 // 重名会让受限账号顶着管理员用户名登录，因此禁止使用。
 func (s *InboundService) CheckInboundRemark(remark string) error {
 	remark = strings.TrimSpace(remark)
 	if remark == "" {
 		return nil
+	}
+	if reservedRemarks[strings.ToLower(remark)] {
+		return common.NewErrorf("非法的用户名")
 	}
 	var count int64
 	if err := database.GetDB().Model(model.User{}).Where("username = ?", remark).Count(&count).Error; err != nil {
