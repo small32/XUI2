@@ -119,21 +119,21 @@ func (s *InboundService) GetInboundByPort(port int) (*model.Inbound, error) {
 	return inbound, nil
 }
 
-// CheckInboundCredential 校验受限登录凭据：账号为入站端口号，密码为入站密码。
+// CheckInboundCredential 校验受限登录凭据：账号=入站"备注"（即入站用户名），密码=入站密码。
 // 仅支持 trojan / shadowsocks / socks / http 四种带密码的协议，其余返回 nil。
-func (s *InboundService) CheckInboundCredential(port int, password string) *model.Inbound {
-	if password == "" {
+func (s *InboundService) CheckInboundCredential(username, password string) *model.Inbound {
+	if username == "" || password == "" {
 		return nil
 	}
-	inbound, err := s.GetInboundByPort(port)
-	if err != nil || inbound == nil {
+	var inbound model.Inbound
+	if err := database.GetDB().Where("remark = ?", username).First(&inbound).Error; err != nil || inbound.Id == 0 {
 		return nil
 	}
-	expected := inboundPassword(inbound)
+	expected := inboundPassword(&inbound)
 	if expected == "" || expected != password {
 		return nil
 	}
-	return inbound
+	return &inbound
 }
 
 // GetInboundPassword 按入站 id 取其当前密码，用于受限登录会话内脱敏回显。

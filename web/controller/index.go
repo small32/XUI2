@@ -2,7 +2,6 @@ package controller
 
 import (
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 	"xui/config"
@@ -134,11 +133,11 @@ func (a *IndexController) login(c *gin.Context) {
 		return
 	}
 
-	// 管理员校验失败后，继续尝试受限登录：账号=入站端口号，密码=入站密码。
+	// 管理员校验失败后，继续尝试受限登录：账号=入站备注（即入站用户名），密码=入站密码。
 	// 受限尝试始终执行（不因开关跳过）；开关只决定受限账号命中后是否放行——
 	// 命中但开关关闭时明确提示"非管理员登录已禁用"，命中且开启时才建立受限会话。
-	if port, convErr := strconv.Atoi(form.Username); config.Role() == "manager" && convErr == nil {
-		if inbound := a.inboundService.CheckInboundCredential(port, form.Password); inbound != nil {
+	if config.Role() == "manager" {
+		if inbound := a.inboundService.CheckInboundCredential(form.Username, form.Password); inbound != nil {
 			restrictedAllowed, _ := a.settingService.IsRestrictedLoginEnabled()
 			if !restrictedAllowed {
 				logger.Infof("restricted login disabled, inbound %d tried, Ip Address:%s\n", inbound.Id, getRemoteIp(c))

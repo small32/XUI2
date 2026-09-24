@@ -38,7 +38,7 @@
                     <a-tabs default-active-key="1">
                         <a-tab-pane key="1" tab="面板配置">
                             <a-list item-layout="horizontal" style="background: white">
-                                {{if eq .role "manager"}}<setting-list-item type="switch" title="非管理员用户登录" desc="开启后允许非管理员用户（端口号+入站密码）登录；关闭则禁止受限账号登录，保存后立即生效" v-model="allSetting.restrictedLoginEnable"></setting-list-item>{{end}}
+                                {{if eq .role "manager"}}<setting-list-item type="switch" title="非管理员用户登录" desc="开启后允许非管理员用户（入站备注/用户名+入站密码）登录；关闭则禁止受限账号登录，保存后立即生效" v-model="allSetting.restrictedLoginEnable"></setting-list-item>{{end}}
                                 {{if eq .role "agent"}}<setting-list-item type="text" title="对外主机名/域名" desc="被控端对外可达的域名或IP，用于拼接 API 与订阅地址；留空则使用监听地址" v-model="allSetting.externalHost"></setting-list-item>{{end}}
                                 <setting-list-item type="text" title="面板监听 IP" desc="默认留空监听所有 IP，重启面板生效" v-model="allSetting.webListen"></setting-list-item>
                                 <setting-list-item type="number" title="面板监听端口" desc="重启面板生效" v-model.number="allSetting.webPort"></setting-list-item>

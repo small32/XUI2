@@ -35,7 +35,7 @@ type AllSetting struct {
 	WebBasePath        string `json:"webBasePath" form:"webBasePath"`
 	XrayTemplateConfig string `json:"xrayTemplateConfig" form:"xrayTemplateConfig"`
 
-	// RestrictedLoginEnable 是否允许非管理员用户（凭端口号+入站密码）登录。
+	// RestrictedLoginEnable 是否允许非管理员用户（凭入站备注/用户名+入站密码）登录。
 	// 关闭时禁止受限账号登录面板。
 	RestrictedLoginEnable bool `json:"restrictedLoginEnable" form:"restrictedLoginEnable"`
 

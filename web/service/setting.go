@@ -211,7 +211,7 @@ func (s *SettingService) setBool(key string, value bool) error {
 	return s.setString(key, strconv.FormatBool(value))
 }
 
-// IsRestrictedLoginEnabled 是否允许非管理员用户（端口号+入站密码）登录。
+// IsRestrictedLoginEnabled 是否允许非管理员用户（入站备注/用户名+入站密码）登录。
 // 默认允许；关闭后管理员账号校验失败时不再尝试受限登录。
 func (s *SettingService) IsRestrictedLoginEnabled() (bool, error) {
 	return s.getBool("restrictedLoginEnable")
