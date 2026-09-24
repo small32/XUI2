@@ -1025,10 +1025,60 @@ class Inbound extends XrayCommonClass {
             + '#' + encodeURIComponent(remark);
     }
 
-	genTrojanLink(address='', remark='') {
-		let settings = this.settings;
-		return `trojan://${encodeURIComponent(settings.clients[0].password)}@${address}:${this.port}#${encodeURIComponent(remark)}`;
-	}
+    genTrojanLink(address='', remark='') {
+        const password = encodeURIComponent(this.settings.clients[0].password);
+        const url = new URL(`trojan://${password}@${address}:${this.port}`);
+        const params = url.searchParams;
+        const stream = this.stream;
+
+        params.set('security', stream.security);
+        params.set('type', stream.network);
+
+        if (stream.security === 'tls' || stream.security === 'xtls') {
+            if (stream.tls.server) params.set('sni', stream.tls.server);
+            const alpn = stream.tls.alpn;
+            if (Array.isArray(alpn) ? alpn.length : alpn) {
+                params.set('alpn', Array.isArray(alpn) ? alpn.join(',') : alpn);
+            }
+        }
+
+        switch (stream.network) {
+            case 'tcp':
+                if (stream.tcp.type === 'http') {
+                    params.set('headerType', 'http');
+                    params.set('path', stream.tcp.request.path.join(','));
+                    const host = stream.tcp.request.getHeader('Host');
+                    if (host) params.set('host', host);
+                }
+                break;
+            case 'kcp':
+                params.set('headerType', stream.kcp.type);
+                if (stream.kcp.seed) params.set('seed', stream.kcp.seed);
+                break;
+            case 'ws':
+                params.set('path', stream.ws.path);
+                const wsHost = stream.ws.getHeader('Host');
+                if (wsHost) params.set('host', wsHost);
+                break;
+            case 'http':
+                params.set('path', stream.http.path);
+                if (stream.http.host.length && stream.http.host[0]) {
+                    params.set('host', stream.http.host.join(','));
+                }
+                break;
+            case 'quic':
+                params.set('quicSecurity', stream.quic.security);
+                params.set('key', stream.quic.key);
+                params.set('headerType', stream.quic.type);
+                break;
+            case 'grpc':
+                params.set('serviceName', stream.grpc.serviceName);
+                break;
+        }
+
+        url.hash = encodeURIComponent(remark);
+        return url.toString();
+    }
 
     genLink(address='', remark='') {
         switch (this.protocol) {
