@@ -19,7 +19,6 @@
                 <a-table :data-source="visibleRows" :pagination="false" row-key="port">
                     <a-table-column title="用户名" data-index="username"></a-table-column>
                     <a-table-column title="端口" data-index="port"></a-table-column>
-                    <a-table-column title="被控端流量" data-index="remoteText"></a-table-column>
                     <a-table-column title="总流量" data-index="totalText"></a-table-column>
                     <a-table-column title="流量限制" data-index="limitText"></a-table-column>
                     <a-table-column title="计费方式">
@@ -55,14 +54,10 @@
                     </a-table>
                 </a-modal>
                 <a-modal v-model="snapshotModal.visible" :title="snapshotModal.title" :footer="null" width="820px">
-                    <a-table :data-source="snapshotModal.rows" :loading="snapshotModal.loading"
+                    <a-table :columns="snapshotModal.columns" :data-source="snapshotModal.rows"
+                             :loading="snapshotModal.loading"
                              :pagination="false" row-key="yyyymm" size="small"
-                             :locale="{ emptyText: snapshotModal.emptyText }">
-                        <a-table-column title="月份" data-index="period"></a-table-column>
-                        <a-table-column title="被控端流量" data-index="remoteText"></a-table-column>
-                        <a-table-column title="总流量" data-index="usedText"></a-table-column>
-                        <a-table-column title="流量限制" data-index="limitText"></a-table-column>
-                    </a-table>
+                             :locale="{ emptyText: snapshotModal.emptyText }"></a-table>
                 </a-modal>
             </a-card>
         </a-layout-content>
@@ -85,7 +80,8 @@
                 title: '月度流量快照',
                 // 表格空数据的说明：按月与累计两种账号没有留档的原因不同，分开讲清楚。
                 emptyText: '',
-                rows: []
+                rows: [],
+                columns: []
             },
             nodesModal: {visible:false,title:'节点流量',rows:[]}
         },
@@ -122,10 +118,25 @@
                     : '该账号未勾选“按月计算”，不做月度清零，因此没有月度留档';
                 this.snapshotModal.visible = true;
                 this.snapshotModal.loading = true;
+                this.snapshotModal.columns = [];
                 let m = await HttpUtil.post('/xui/traffic-summary/snapshots', {inboundId: row.inboundId});
                 this.snapshotModal.loading = false;
-                if (m.success) this.snapshotModal.rows = m.obj || [];
-                else this.$message.error(m.msg);
+                if (m.success) {
+                    const page = m.obj || {nodes: [], rows: []};
+                    // 动态列：月份 / 总流量 / 每个启用被控端节点 / 当月流量限制。
+                    // 节点列名取被控端管理里的节点名称，当月无留档显示 "-"。
+                    this.snapshotModal.columns = [
+                        {title: '月份', dataIndex: 'period'},
+                        {title: '总流量', dataIndex: 'usedText'},
+                        ...(page.nodes || []).map(n => ({
+                            title: n,
+                            key: 'node_' + n,
+                            customRender: (text, r) => (r.nodeUsedText && r.nodeUsedText[n]) || '-'
+                        })),
+                        {title: '流量限制', dataIndex: 'limitText'},
+                    ];
+                    this.snapshotModal.rows = page.rows || [];
+                } else this.$message.error(m.msg);
             }
         },
         mounted() {

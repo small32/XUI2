@@ -13,8 +13,8 @@ type NodeRow struct {
 }
 
 type ServerSetting struct {
-	AutoDisable               bool   `json:"autoDisable" form:"autoDisable"`
-	HeartbeatMinutes          int    `json:"heartbeatMinutes" form:"heartbeatMinutes"`
+	AutoDisable      bool `json:"autoDisable" form:"autoDisable"`
+	HeartbeatMinutes int  `json:"heartbeatMinutes" form:"heartbeatMinutes"`
 }
 
 type ServerTraffic struct {
@@ -67,4 +67,15 @@ type TrafficSnapshot struct {
 	UsedText   string `json:"usedText"`
 	LimitText  string `json:"limitText"`
 	ResetAt    int64  `json:"resetAt"`
+	// NodeUsed 是当月各启用被控端节点上的用量（上传+下载），key 为节点名称。
+	// NodeUsedText 是 NodeUsed 对应换算后的展示文本；节点当月无留档时不存在对应键。
+	NodeUsed     map[string]int64  `json:"nodeUsed"`
+	NodeUsedText map[string]string `json:"nodeUsedText"`
+}
+
+// TrafficSnapshotPage 是月度流量快照页的完整负载：Nodes 驱动前端动态列，
+// Rows 为各月份留档（每行按节点名称给出当月用量）。
+type TrafficSnapshotPage struct {
+	Nodes []string           `json:"nodes"`
+	Rows  []*TrafficSnapshot `json:"rows"`
 }

@@ -226,14 +226,16 @@ func TestManagerMonthlySnapshotUsesAgentResetResult(t *testing.T) {
 	if err := s.MaybeMonthlyReset(); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := s.TrafficResetSnapshots(in.Id)
+	page, err := s.TrafficResetSnapshots(in.Id)
+	rows := page.Rows
 	if err != nil || len(rows) != 1 || rows[0].Remote != 100 || rows[0].Yyyymm != period {
 		t.Fatalf("snapshot=%v err=%v", rows, err)
 	}
 	if err := s.MaybeMonthlyReset(); err != nil {
 		t.Fatal(err)
 	}
-	rows, err = s.TrafficResetSnapshots(in.Id)
+	page, err = s.TrafficResetSnapshots(in.Id)
+	rows = page.Rows
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("duplicate snapshot=%v err=%v", rows, err)
 	}

@@ -15,6 +15,7 @@ import (
 
 	"xui/database"
 	"xui/database/model"
+	"xui/web/service"
 )
 
 // 入站表单的「按月计算」勾选必须真正落库：写不进去会让账号一直累计（客户月初用不了），
@@ -36,7 +37,15 @@ func TestInboundMonthlyResetRoundTrip(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	engine.Use(sessions.Sessions("session", cookie.NewStore([]byte("test-secret"))))
-	engine.POST("/xui/inbound/update/:id", (&InboundController{}).updateInbound)
+	// updateInbound 会触发入站变更后的心跳与账号同步，需注入可用的 service，
+	// 否则 a.server / a.inboundService 为空会在运行时解引用崩溃。
+	serverMgr := &ServerManagementController{}
+	ctrl := &InboundController{
+		inboundService: service.InboundService{},
+		serverService:  service.ServerManagementService{},
+		server:         serverMgr,
+	}
+	engine.POST("/xui/inbound/update/:id", ctrl.updateInbound)
 
 	// 表单提交的字段与页面 updateInbound 组装的一致。
 	payload := func(monthly bool) string {

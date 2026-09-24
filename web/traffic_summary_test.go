@@ -40,14 +40,17 @@ func TestTrafficSummaryTemplate(t *testing.T) {
 	}
 	body := buf.String()
 	// 单位换算在后端完成，页面只渲染已换算好的文本列。
+	// 汇总表默认只展示总流量；被控端流量不直接列示，需点"节点明细"查看。
 	for _, column := range []string{
-		`data-index="remoteText"`,
 		`data-index="totalText"`,
 		`data-index="limitText"`,
 	} {
 		if !strings.Contains(body, column) {
 			t.Fatalf("页面缺少列 %s", column)
 		}
+	}
+	if strings.Contains(body, `data-index="remoteText"`) {
+		t.Fatalf("汇总表不应再直接展示被控端流量列 remoteText，需经节点明细查看")
 	}
 	for _, stale := range []string{`data-index="local"`, `data-index="remote"`, `data-index="total"`, `data-index="limit"`} {
 		if strings.Contains(body, stale) {

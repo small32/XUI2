@@ -452,7 +452,7 @@ func (s *ServerManagementService) MaybeMonthlyReset() error {
 	})
 }
 
-func (s *ServerManagementService) TrafficResetSnapshots(inboundID int) ([]*entity.TrafficSnapshot, error) {
+func (s *ServerManagementService) TrafficResetSnapshots(inboundID int) (*entity.TrafficSnapshotPage, error) {
 	query := database.GetDB().Model(&model.TrafficSnapshot{})
 	if inboundID > 0 {
 		query = query.Where("inbound_id = ?", inboundID)
@@ -461,12 +461,60 @@ func (s *ServerManagementService) TrafficResetSnapshots(inboundID int) ([]*entit
 	if err := query.Order("yyyymm DESC, port").Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	// 启用节点列表：节点名称作为快照表格的动态列（顺序稳定），并用于按节点填充分组用量。
+	allNodes, err := s.Nodes()
+	if err != nil {
+		return nil, err
+	}
+	enabledNames := make([]string, 0, len(allNodes))
+	nodeNameByID := make(map[int]string, len(allNodes))
+	for _, node := range allNodes {
+		if !node.Enabled {
+			continue
+		}
+		enabledNames = append(enabledNames, node.Name)
+		nodeNameByID[node.Id] = node.Name
+	}
+	// 汇总所有留档行的月份，一次取出这些月份的被控端节点级留档，按 账号->节点 聚合。
+	months := make([]int, 0, len(rows))
+	seenMonth := make(map[int]bool, len(rows))
+	for _, row := range rows {
+		if !seenMonth[row.Yyyymm] {
+			seenMonth[row.Yyyymm] = true
+			months = append(months, row.Yyyymm)
+		}
+	}
+	nodeSnapByAccount := make(map[int]map[int]int64) // accountID -> nodeID -> up+down
+	if len(months) > 0 {
+		var nodeSnaps []model.NodeTrafficSnapshot
+		if err := database.GetDB().Where("yyyymm IN ?", months).Find(&nodeSnaps).Error; err != nil {
+			return nil, err
+		}
+		for _, snap := range nodeSnaps {
+			if nodeSnapByAccount[snap.AccountID] == nil {
+				nodeSnapByAccount[snap.AccountID] = make(map[int]int64)
+			}
+			nodeSnapByAccount[snap.AccountID][snap.NodeID] += snap.Up + snap.Down
+		}
+	}
 	out := make([]*entity.TrafficSnapshot, 0, len(rows))
 	for _, row := range rows {
 		local, remote := row.LocalUp+row.LocalDown, row.RemoteUp+row.RemoteDown
-		out = append(out, &entity.TrafficSnapshot{Yyyymm: row.Yyyymm, Period: YyyymmPeriod(row.Yyyymm), InboundId: row.InboundId, Port: row.Port, Remark: row.Remark, Local: local, Remote: remote, Used: local + remote, Limit: row.Total, LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(remote), UsedText: FormatTrafficSize(local + remote), LimitText: FormatTrafficLimit(row.Total), ResetAt: row.ResetAt})
+		item := &entity.TrafficSnapshot{Yyyymm: row.Yyyymm, Period: YyyymmPeriod(row.Yyyymm), InboundId: row.InboundId, Port: row.Port, Remark: row.Remark, Local: local, Remote: remote, Used: local + remote, Limit: row.Total, LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(remote), UsedText: FormatTrafficSize(local + remote), LimitText: FormatTrafficLimit(row.Total), ResetAt: row.ResetAt}
+		perNode := nodeSnapByAccount[row.InboundId]
+		if len(perNode) > 0 {
+			item.NodeUsed = make(map[string]int64, len(enabledNames))
+			item.NodeUsedText = make(map[string]string, len(enabledNames))
+			for nodeID, name := range nodeNameByID {
+				if used, ok := perNode[nodeID]; ok {
+					item.NodeUsed[name] = used
+					item.NodeUsedText[name] = FormatTrafficSize(used)
+				}
+			}
+		}
+		out = append(out, item)
 	}
-	return out, nil
+	return &entity.TrafficSnapshotPage{Nodes: enabledNames, Rows: out}, nil
 }
 
 // RemoteInbounds reads every enabled node for subscription generation.
