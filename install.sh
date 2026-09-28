@@ -198,16 +198,16 @@ configure_role() {
 
 #This function will be called when user installed xui out of sercurity
 config_after_install() {
-    echo -e "${yellow}出于安全考虑，安装/更新完成后需要强制修改端口与账户密码${plain}"
+    echo -e "${yellow}安装/更新完成后可设置面板端口与 admin 账号密码${plain}"
     read -p "确认是否继续?[y/n]": config_confirm
     if [[ x"${config_confirm}" == x"y" || x"${config_confirm}" == x"Y" ]]; then
-        read -p "请设置您的账户名:" config_account
-        echo -e "${yellow}您的账户名将设定为:${config_account}${plain}"
-        read -r -p "请设置您的账户密码:" config_password
+        echo -e "${yellow}管理员用户名固定为 admin${plain}"
+        read -r -s -p "请设置 admin 账户密码:" config_password
+        echo
         read -p "请设置面板访问端口:" config_port
         echo -e "${yellow}您的面板访问端口将设定为:${config_port}${plain}"
         echo -e "${yellow}确认设定,设定中${plain}"
-        /usr/local/xui/xui setting -username "${config_account}" -password "${config_password}"
+        /usr/local/xui/xui setting -username admin -password "${config_password}"
         echo -e "${yellow}账户密码设定完成${plain}"
         /usr/local/xui/xui setting -port "${config_port}"
         echo -e "${yellow}面板端口设定完成${plain}"

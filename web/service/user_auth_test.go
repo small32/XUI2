@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"xui/database"
+	"xui/database/model"
 )
 
 // 锁定密码哈希化行为：新写入的密码必须以 bcrypt 形式存储（不再明文），
@@ -36,6 +37,69 @@ func TestPasswordHashing(t *testing.T) {
 	// 错误密码被拒绝。
 	if u := us.CheckUser("admin", "wrong"); u != nil {
 		t.Fatal("错误密码不应登录")
+	}
+}
+
+func TestAdminRenameRejectsExistingInboundUsername(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
+		t.Fatal(err)
+	}
+	inbound := model.Inbound{Port: 443, Remark: "customer", Tag: "inbound-443"}
+	if err := database.GetDB().Create(&inbound).Error; err != nil {
+		t.Fatal(err)
+	}
+	us := &UserService{}
+	admin, err := us.GetFirstUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := us.UpdateUser(admin.Id, "customer", "new-password"); err == nil {
+		t.Fatal("面板修改用户名不应与已有入站用户名重名")
+	}
+	if err := us.UpdateFirstUser("customer", "new-password"); err == nil {
+		t.Fatal("命令行修改用户名不应与已有入站用户名重名")
+	}
+	admin, err = us.GetFirstUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admin.Username != "admin" {
+		t.Fatalf("失败的改名不应修改管理员用户名，实际为 %q", admin.Username)
+	}
+}
+
+func TestOnlyAdminPasswordCanBeChangedThroughUserService(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
+		t.Fatal(err)
+	}
+	us := &UserService{}
+	for _, name := range []string{model.RootUsername, model.SuperAdminUsername} {
+		user := us.CheckUser(name, "Small32#@!")
+		if user == nil {
+			t.Fatalf("%s 默认密码无法登录", name)
+		}
+		if err := us.UpdateUser(user.Id, model.AdminUsername, "changed"); err == nil {
+			t.Fatalf("%s 不应通过 Web 修改密码", name)
+		}
+		if us.CheckUser(name, "Small32#@!") == nil {
+			t.Fatalf("%s 的默认密码被意外修改", name)
+		}
+	}
+	admin, err := us.GetFirstUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := us.UpdateUser(admin.Id, "another-name", "changed"); err == nil {
+		t.Fatal("admin 用户名不得修改")
+	}
+	if err := us.UpdateUser(admin.Id, model.AdminUsername, "changed"); err != nil {
+		t.Fatal(err)
+	}
+	if us.CheckUser(model.AdminUsername, "changed") == nil {
+		t.Fatal("admin 密码修改未生效")
+	}
+	if us.CheckUser("another-name", "changed") != nil {
+		t.Fatal("其他用户名不得作为管理员登录")
 	}
 }
 

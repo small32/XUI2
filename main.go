@@ -136,6 +136,9 @@ func updateSetting(port int, username string, password string) {
 	}
 	if username != "" || password != "" {
 		userService := service.UserService{}
+		if username == "" {
+			username = "admin"
+		}
 		err := userService.UpdateFirstUser(username, password)
 		if err != nil {
 			fmt.Println("set username and password failed:", err)
@@ -170,8 +173,8 @@ func main() {
 	settingCmd.BoolVar(&reset, "reset", false, "reset all settings")
 	settingCmd.BoolVar(&show, "show", false, "show current settings")
 	settingCmd.IntVar(&port, "port", 0, "set panel port")
-	settingCmd.StringVar(&username, "username", "", "set login username")
-	settingCmd.StringVar(&password, "password", "", "set login password")
+	settingCmd.StringVar(&username, "username", "", "admin username (fixed to admin)")
+	settingCmd.StringVar(&password, "password", "", "set admin password")
 	settingCmd.StringVar(&certFile, "cert", "", "set panel HTTPS certificate path")
 	settingCmd.StringVar(&keyFile, "key", "", "set panel HTTPS private key path")
 

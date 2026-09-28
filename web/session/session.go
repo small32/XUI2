@@ -71,7 +71,7 @@ func IsLogin(c *gin.Context) bool {
 	if database.GetDB() == nil || database.GetDB().Where("id = ?", u.Id).First(&current).Error != nil {
 		return false
 	}
-	return stored == current.Password
+	return model.IsPanelAdminUsername(current.Username) && stored == current.Password
 }
 
 // IsAdminLogin 是否为管理员登录。受限登录不建立用户会话，故这里等价于 IsLogin。

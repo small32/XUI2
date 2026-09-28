@@ -84,8 +84,7 @@ func (a *InboundController) getInbounds(c *gin.Context) {
 		jsonObj(c, []*model.Inbound{inbound}, nil)
 		return
 	}
-	user := session.GetLoginUser(c)
-	inbounds, err := a.inboundService.GetInbounds(user.Id)
+	inbounds, err := a.inboundService.GetAllInbounds()
 	if err != nil {
 		jsonMsg(c, "获取", err)
 		return

@@ -163,7 +163,7 @@ func (a *AgentAPI) upsert(c *gin.Context) {
 			return
 		}
 		var owner model.User
-		if err := database.GetDB().First(&owner).Error; err != nil {
+		if err := database.GetDB().Where("username = ?", model.AdminUsername).First(&owner).Error; err != nil {
 			apiError(c, err)
 			return
 		}

@@ -44,7 +44,7 @@ func (s *UserService) GetFirstUser() (*model.User, error) {
 
 	user := &model.User{}
 	err := db.Model(model.User{}).
-		First(user).
+		Where("username = ?", model.AdminUsername).First(user).
 		Error
 	if err != nil {
 		return nil, err
@@ -53,6 +53,9 @@ func (s *UserService) GetFirstUser() (*model.User, error) {
 }
 
 func (s *UserService) CheckUser(username string, password string) *model.User {
+	if !model.IsPanelAdminUsername(username) {
+		return nil
+	}
 	db := database.GetDB()
 
 	user := &model.User{}
@@ -81,21 +84,31 @@ func (s *UserService) CheckUser(username string, password string) *model.User {
 }
 
 func (s *UserService) UpdateUser(id int, username string, password string) error {
+	if username != model.AdminUsername {
+		return errors.New("管理员用户名固定为 admin")
+	}
+	if password == "" {
+		return errors.New("password can not be empty")
+	}
 	db := database.GetDB()
 	hashed, err := HashPassword(password)
 	if err != nil {
 		return err
 	}
-	return db.Model(model.User{}).
-		Where("id = ?", id).
-		Update("username", username).
-		Update("password", hashed).
-		Error
+	result := db.Model(model.User{}).Where("id = ? AND username = ?", id, model.AdminUsername).
+		Update("password", hashed)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("只有 admin 账号可在面板修改密码")
+	}
+	return nil
 }
 
 func (s *UserService) UpdateFirstUser(username string, password string) error {
-	if username == "" {
-		return errors.New("username can not be empty")
+	if username != model.AdminUsername {
+		return errors.New("管理员用户名固定为 admin")
 	} else if password == "" {
 		return errors.New("password can not be empty")
 	}
@@ -105,15 +118,14 @@ func (s *UserService) UpdateFirstUser(username string, password string) error {
 	}
 	db := database.GetDB()
 	user := &model.User{}
-	err = db.Model(model.User{}).First(user).Error
+	err = db.Model(model.User{}).Where("username = ?", model.AdminUsername).First(user).Error
 	if database.IsNotFound(err) {
-		user.Username = username
+		user.Username = model.AdminUsername
 		user.Password = hashed
 		return db.Model(model.User{}).Create(user).Error
 	} else if err != nil {
 		return err
 	}
-	user.Username = username
 	user.Password = hashed
 	return db.Save(user).Error
 }

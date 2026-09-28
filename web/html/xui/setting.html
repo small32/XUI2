@@ -62,17 +62,14 @@
                             </a-descriptions>
                             {{end}}
                         </a-tab-pane>
-                        <a-tab-pane key="2" tab="用户设置">
+                        {{if .canEditAdmin}}<a-tab-pane key="2" tab="管理员密码">
                             <a-form style="background: white; padding: 20px">
-                                <a-form-item label="原用户名">
-                                    <a-input v-model="user.oldUsername" style="max-width: 300px"></a-input>
+                                <a-form-item label="用户名">
+                                    <a-input value="admin" disabled style="max-width: 300px"></a-input>
                                 </a-form-item>
                                 <a-form-item label="原密码">
                                     <a-input type="password" v-model="user.oldPassword"
                                              style="max-width: 300px"></a-input>
-                                </a-form-item>
-                                <a-form-item label="新用户名">
-                                    <a-input v-model="user.newUsername" style="max-width: 300px"></a-input>
                                 </a-form-item>
                                 <a-form-item label="新密码">
                                     <a-input type="password" v-model="user.newPassword"
@@ -82,7 +79,7 @@
                                     <a-button type="primary" @click="updateUser">修改</a-button>
                                 </a-form-item>
                             </a-form>
-                        </a-tab-pane>
+                        </a-tab-pane>{{end}}
                         <a-tab-pane key="3" tab="xray 相关设置">
                             <a-list item-layout="horizontal" style="background: white">
                                 <setting-list-item type="textarea" title="xray 配置模版" desc="以该模版为基础生成最终的 xray 配置文件，重启面板生效" v-model="allSetting.xrayTemplateConfig"></setting-list-item>
@@ -113,7 +110,7 @@
             oldAllSetting: new AllSetting(),
             allSetting: new AllSetting(),
             saveBtnDisable: true,
-            user: {},
+            user: { oldUsername: 'admin', newUsername: 'admin', oldPassword: '', newPassword: '' },
             connInfo: null,
             showToken: false,
             refreshingFingerprint: false,
@@ -165,7 +162,7 @@
                 const msg = await HttpUtil.post("/xui/setting/updateUser", this.user);
                 this.loading(false);
                 if (msg.success) {
-                    this.user = {};
+                    this.user = { oldUsername: 'admin', newUsername: 'admin', oldPassword: '', newPassword: '' };
                 }
             },
             async restartPanel() {

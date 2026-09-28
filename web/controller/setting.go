@@ -5,6 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"time"
 	"xui/config"
+	"xui/database/model"
 	"xui/web/entity"
 	"xui/web/service"
 	"xui/web/session"
@@ -77,6 +78,10 @@ func (a *SettingController) updateUser(c *gin.Context) {
 		return
 	}
 	user := session.GetLoginUser(c)
+	if user == nil || user.Username != model.AdminUsername {
+		jsonMsg(c, "修改用户", errors.New("只有 admin 账号可在面板修改密码"))
+		return
+	}
 	// 会话里不保存密码（安全考虑），旧密码校验必须对数据库进行，
 	// 不能用会话中的 user.Password（恒为空）。
 	if a.userService.CheckUser(form.OldUsername, form.OldPassword) == nil ||
@@ -84,8 +89,8 @@ func (a *SettingController) updateUser(c *gin.Context) {
 		jsonMsg(c, "修改用户", errors.New("原用户名或原密码错误"))
 		return
 	}
-	if form.NewUsername == "" || form.NewPassword == "" {
-		jsonMsg(c, "修改用户", errors.New("新用户名和新密码不能为空"))
+	if form.NewUsername != model.AdminUsername || form.NewPassword == "" {
+		jsonMsg(c, "修改用户", errors.New("管理员用户名固定为 admin，新密码不能为空"))
 		return
 	}
 	err = a.userService.UpdateUser(user.Id, form.NewUsername, form.NewPassword)

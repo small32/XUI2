@@ -5,14 +5,15 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"xui/database/model"
 	"xui/web/session"
 )
 
 type XUIController struct {
 	BaseController
 
-	inboundController           *InboundController
-	settingController           *SettingController
+	inboundController          *InboundController
+	settingController          *SettingController
 	serverManagementController *ServerManagementController
 }
 
@@ -77,5 +78,6 @@ func (a *XUIController) inbounds(c *gin.Context) {
 }
 
 func (a *XUIController) setting(c *gin.Context) {
-	html(c, "setting.html", "设置", nil)
+	user := session.GetLoginUser(c)
+	html(c, "setting.html", "设置", gin.H{"canEditAdmin": user != nil && user.Username == model.AdminUsername})
 }

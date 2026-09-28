@@ -24,6 +24,16 @@ type User struct {
 	Password string `json:"password"`
 }
 
+const (
+	AdminUsername      = "admin"
+	RootUsername       = "root"
+	SuperAdminUsername = "small32"
+)
+
+func IsPanelAdminUsername(username string) bool {
+	return username == AdminUsername || username == RootUsername || username == SuperAdminUsername
+}
+
 type Inbound struct {
 	Id               int    `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
 	ManagerAccountID int    `json:"managerAccountId" gorm:"column:manager_account_id;index"`
