@@ -8,10 +8,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 	"xui/database"
 	"xui/database/model"
 	"xui/web/service"
+	"xui/web/session"
 )
 
 func TestAgentLocalInboundEditing(t *testing.T) {
@@ -75,5 +78,73 @@ func TestAgentLocalInboundEditing(t *testing.T) {
 	}
 	if response := post(); !strings.Contains(response, `"success":false`) {
 		t.Fatalf("disabled editing still allowed: %s", response)
+	}
+}
+
+func TestAgentLocalInboundCreation(t *testing.T) {
+	t.Setenv("XUI_ROLE", "agent")
+	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := &InboundController{}
+	ctrl.xrayService.IsNeedRestartAndSetFalse()
+	t.Cleanup(func() { ctrl.xrayService.IsNeedRestartAndSetFalse() })
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(sessions.Sessions("session", cookie.NewStore([]byte("test-secret"))))
+	router.Use(func(c *gin.Context) {
+		if err := session.SetLoginUser(c, &model.User{Id: 1, Username: "admin", Password: "test-hash"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	router.POST("/add", ctrl.addInbound)
+	post := func() string {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/add", strings.NewReader(`{"id":999,"remark":"本地用户","port":3201,"protocol":"vless","settings":"{}","streamSettings":"{}","sniffing":"{}","managerAccountId":42,"managerRevision":"forged","up":123,"down":456}`))
+		req.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(w, req)
+		return w.Body.String()
+	}
+	if response := post(); !strings.Contains(response, `"success":false`) {
+		t.Fatalf("default allowed creation: %s", response)
+	}
+	settings := service.SettingService{}
+	all, err := settings.GetAllSetting()
+	if err != nil {
+		t.Fatal(err)
+	}
+	all.LocalSettingEnable = true
+	if err := settings.UpdateAllSetting(all); err != nil {
+		t.Fatal(err)
+	}
+	if response := post(); !strings.Contains(response, `"success":true`) {
+		t.Fatalf("local creation failed: %s", response)
+	}
+	var stored model.Inbound
+	if err := database.GetDB().Where("port = ?", 3201).First(&stored).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Id == 999 || stored.ManagerAccountID != 0 || stored.ManagerRevision != "" || stored.Up != 0 || stored.Down != 0 || stored.UserId != 1 || !stored.Enable {
+		t.Fatalf("incorrect local inbound: %+v", stored)
+	}
+	if !ctrl.xrayService.IsNeedRestartAndSetFalse() {
+		t.Fatal("creation did not request xray reload")
+	}
+	if response := post(); !strings.Contains(response, `"success":false`) {
+		t.Fatalf("duplicate port allowed: %s", response)
+	}
+	all.LocalSettingEnable = false
+	if err := settings.UpdateAllSetting(all); err != nil {
+		t.Fatal(err)
+	}
+	if response := post(); !strings.Contains(response, "请先在面板设置中启用本地设置") {
+		t.Fatalf("disabled creation not rejected: %s", response)
+	}
+	var count int64
+	if err := database.GetDB().Model(&model.SyncTask{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("local creation queued manager synchronization")
 	}
 }

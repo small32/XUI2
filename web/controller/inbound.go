@@ -149,9 +149,13 @@ func (a *InboundController) restrictedSubscription(c *gin.Context) {
 }
 
 func (a *InboundController) addInbound(c *gin.Context) {
-	if config.Role() == "agent" {
-		pureJsonMsg(c, false, "被控端账号由管理端统一管理")
-		return
+	local := config.Role() == "agent"
+	if local {
+		enabled, err := a.settingService.IsLocalSettingEnabled()
+		if err != nil || !enabled {
+			pureJsonMsg(c, false, "请先在面板设置中启用本地设置")
+			return
+		}
 	}
 	inbound := &model.Inbound{}
 	err := c.ShouldBind(inbound)
@@ -164,12 +168,23 @@ func (a *InboundController) addInbound(c *gin.Context) {
 		return
 	}
 	user := session.GetLoginUser(c)
+	if user == nil {
+		pureJsonMsg(c, false, "请先登录管理员账号")
+		return
+	}
+	inbound.Id = 0
+	inbound.ManagerAccountID = 0
+	inbound.ManagerRevision = ""
+	inbound.Up, inbound.Down = 0, 0
+	inbound.DisabledBy = ""
 	inbound.UserId = user.Id
 	inbound.Enable = true
 	inbound.Tag = fmt.Sprintf("inbound-%v", inbound.Port)
 	// The agent fills certificate paths from its own panel settings.
 	err = a.inboundService.AddInbound(inbound)
-	if err == nil {
+	if err == nil && local {
+		a.xrayService.SetToNeedRestart()
+	} else if err == nil {
 		a.server.heartbeatSoon()
 		if syncErr := a.serverService.SyncInbound(inbound, 0, true); syncErr != nil {
 			logger.Warning("被控端账号同步待重试: ", syncErr)
