@@ -1,6 +1,7 @@
 package web
 
 import (
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,31 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/securecookie"
 )
+
+func TestSessionCookieSecureOnTLS(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.Use(sessions.Sessions("session", newSessionStore([]byte("test-signing-secret"))))
+	engine.Use(secureSessionCookies)
+	engine.GET("/set", func(c *gin.Context) {
+		sessions.Default(c).Set("user", "admin")
+		if err := sessions.Default(c).Save(); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, secure := range []bool{false, true} {
+		req := httptest.NewRequest(http.MethodGet, "/set", nil)
+		if secure {
+			req.TLS = &tls.ConnectionState{}
+		}
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		cookies := w.Result().Cookies()
+		if len(cookies) != 1 || cookies[0].Secure != secure {
+			t.Fatalf("TLS=%t cookie secure mismatch: %+v", secure, cookies)
+		}
+	}
+}
 
 func TestSessionCookieEncryptsSessionValues(t *testing.T) {
 	gin.SetMode(gin.TestMode)

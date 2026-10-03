@@ -35,6 +35,9 @@ type AllSetting struct {
 	WebBasePath        string `json:"webBasePath" form:"webBasePath"`
 	XrayTemplateConfig string `json:"xrayTemplateConfig" form:"xrayTemplateConfig"`
 
+	// LocalSettingEnable 允许被控端管理员编辑本地入站设置，默认关闭。
+	LocalSettingEnable bool `json:"localSettingEnable" form:"localSettingEnable"`
+
 	// RestrictedLoginEnable 是否允许非管理员用户（凭入站备注/用户名+入站密码）登录。
 	// 关闭时禁止受限账号登录面板。
 	RestrictedLoginEnable bool `json:"restrictedLoginEnable" form:"restrictedLoginEnable"`
@@ -92,13 +95,12 @@ func (s *AllSetting) CheckValid() error {
 	return nil
 }
 
-
 // AgentConnectionInfo 是被控端在自己面板设置页展示的只读连接信息。
 // Token 与指纹由服务层在请求时动态计算，不落库、不来自 AllSetting。
 type AgentConnectionInfo struct {
-	ApiUrl      string `json:"apiUrl"`
+	ApiUrl       string `json:"apiUrl"`
 	SubscribeUrl string `json:"subscribeUrl"`
-	Port        int    `json:"port"`
-	CertSha256  string `json:"certSha256"`
-	Token       string `json:"token"`
+	Port         int    `json:"port"`
+	CertSha256   string `json:"certSha256"`
+	Token        string `json:"token"`
 }

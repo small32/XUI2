@@ -44,7 +44,7 @@
                 <transition name="list" appear>
                     <a-card hoverable>
                         <div slot="title">
-                            <a-button v-if="!restricted" type="primary" icon="plus" @click="openAddInbound"></a-button>
+                            <a-button v-if="!restricted && role === 'manager'" type="primary" icon="plus" @click="openAddInbound"></a-button>
                         </div>
 <!--                        <a-input v-model="searchKey" placeholder="搜索" autofocus style="max-width: 300px"></a-input>-->
                         <a-checkbox-group v-if="!restricted" v-model="filters" style="margin-top: 16px">
@@ -69,13 +69,13 @@
                                         <a-menu-item v-if="dbInbound.hasLink()" key="clashSubscription">
                                             <a-icon type="link"></a-icon>生成订阅
                                         </a-menu-item>
-                                        <a-menu-item v-if="!restricted" key="edit">
+                                        <a-menu-item v-if="canEditInbound" key="edit">
                                             <a-icon type="edit"></a-icon>编辑
                                         </a-menu-item>
-                                        <a-menu-item v-if="!restricted" key="resetTraffic">
+                                        <a-menu-item v-if="!restricted && role === 'manager'" key="resetTraffic">
                                             <a-icon type="retweet"></a-icon>重置流量
                                         </a-menu-item>
-                                        <a-menu-item v-if="!restricted" key="delete">
+                                        <a-menu-item v-if="!restricted && role === 'manager'" key="delete">
                                             <span style="color: #FF4D4F">
                                                 <a-icon type="delete"></a-icon>删除
                                             </span>
@@ -94,7 +94,7 @@
                                 <a-button type="link" @click="showInfo(dbInbound)">查看</a-button>
                             </template>
                             <template slot="enable" slot-scope="text, dbInbound">
-                                <a-switch v-model="dbInbound.enable" :disabled="restricted" @change="switchEnable(dbInbound)"></a-switch>
+                                <a-switch v-model="dbInbound.enable" :disabled="!canEditInbound" @change="switchEnable(dbInbound)"></a-switch>
                             </template>
                             <template slot="expiryTime" slot-scope="text, dbInbound">
                                 <template v-if="dbInbound.expiryTime > 0">
@@ -196,6 +196,8 @@
         data: {
             siderDrawer,
             restricted,
+            role,
+            canEditInbound: {{ .canEditInbound }},
             spinning: false,
             inbounds: [],
             dbInbounds: [],

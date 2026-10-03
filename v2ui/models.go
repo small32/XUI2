@@ -14,6 +14,8 @@ type V2Inbound struct {
 	Remark         string
 	Up             int64
 	Down           int64
+	Total          int64
+	ExpiryTime     int64
 	Enable         bool
 }
 
@@ -26,10 +28,10 @@ func (i *V2Inbound) ToInbound(userId int) *model.Inbound {
 		UserId:         userId,
 		Up:             i.Up,
 		Down:           i.Down,
-		Total:          0,
+		Total:          i.Total,
 		Remark:         i.Remark,
 		Enable:         i.Enable,
-		ExpiryTime:     0,
+		ExpiryTime:     i.ExpiryTime,
 		Listen:         i.Listen,
 		Port:           i.Port,
 		Protocol:       model.Protocol(i.Protocol),

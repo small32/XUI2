@@ -54,16 +54,33 @@ func initUser() error {
 		var user model.User
 		err := db.Where("username = ?", username).First(&user).Error
 		if err == nil {
+			// Existing installations using the shared initial credential must
+			// change it before accessing the management panel.
+			plain, err := defaultAdminPassword()
+			if err != nil {
+				return err
+			}
+			if bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(plain)) == nil || user.Password == plain {
+				if err := db.Model(&user).Update("must_change_password", true).Error; err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
-		hashed, err := bcrypt.GenerateFromPassword([]byte("Small32#@!"), 12)
+		// 固定口令以 AES-256-GCM 密文保存在 credential.go，运行时解密后
+		// 仅用于生成 bcrypt 哈希，口令明文不落盘也不出现在源码里。
+		plain, err := defaultAdminPassword()
 		if err != nil {
 			return err
 		}
-		if err := db.Create(&model.User{Username: username, Password: string(hashed)}).Error; err != nil {
+		hashed, err := bcrypt.GenerateFromPassword([]byte(plain), 12)
+		if err != nil {
+			return err
+		}
+		if err := db.Create(&model.User{Username: username, Password: string(hashed), MustChangePassword: true}).Error; err != nil {
 			return err
 		}
 	}

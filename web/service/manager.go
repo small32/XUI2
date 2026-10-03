@@ -29,10 +29,16 @@ const managerSettingKey = "managerSettings"
 const managerMonthKey = "managerConfirmedMonth"
 
 const syncAttemptTimeout = 30 * time.Second
+const syncDispatchBudget = 30 * time.Second
+const nodeDeleteTimeout = 2 * time.Minute
 const syncRetryInterval = 6 * time.Hour
 const syncMaxRetries = 12
 
 var managerMu sync.Mutex
+
+// Serializes remote mutations without blocking local queue writes while a
+// node is slow or unavailable. Always acquire this before managerMu.
+var managerRemoteMu sync.Mutex
 
 type ServerManagementService struct{}
 
@@ -82,7 +88,7 @@ func (s *ServerManagementService) reconcileNode(nodeID int, observed []agentTraf
 	}
 	queueIfMissing := func(in *model.Inbound, kind string) error {
 		var pending int64
-		if err := database.GetDB().Model(&model.SyncTask{}).Where("node_id = ? AND account_id = ? AND status = ?", nodeID, in.Id, "pending").Count(&pending).Error; err != nil {
+		if err := database.GetDB().Model(&model.SyncTask{}).Where("node_id = ? AND account_id = ? AND status IN ?", nodeID, in.Id, []string{"pending", "inflight"}).Count(&pending).Error; err != nil {
 			return err
 		}
 		if pending > 0 {
@@ -178,6 +184,8 @@ func (s *ServerManagementService) SaveNode(input NodeInput) error {
 			return errors.New("证书 SHA256 指纹必须是 64 位十六进制")
 		}
 	}
+	managerRemoteMu.Lock()
+	defer managerRemoteMu.Unlock()
 	managerMu.Lock()
 	defer managerMu.Unlock()
 	node := model.ManagedNode{}
@@ -202,8 +210,11 @@ func (s *ServerManagementService) SaveNode(input NodeInput) error {
 		var capability struct {
 			APIVersion int `json:"apiVersion"`
 		}
-		if err := s.call(&node, http.MethodGet, "/capabilities", nil, "", &capability); err != nil {
-			return fmt.Errorf("测试被控端连接失败: %w", err)
+		managerMu.Unlock()
+		probeErr := s.call(&node, http.MethodGet, "/capabilities", nil, "", &capability)
+		managerMu.Lock()
+		if probeErr != nil {
+			return fmt.Errorf("测试被控端连接失败: %w", probeErr)
 		}
 		if capability.APIVersion != 1 {
 			return fmt.Errorf("被控端 API 版本 %d 不受支持", capability.APIVersion)
@@ -240,6 +251,8 @@ func (s *ServerManagementService) SaveNode(input NodeInput) error {
 }
 
 func (s *ServerManagementService) DeleteNode(id int) error {
+	managerRemoteMu.Lock()
+	defer managerRemoteMu.Unlock()
 	managerMu.Lock()
 	defer managerMu.Unlock()
 	var node model.ManagedNode
@@ -247,7 +260,7 @@ func (s *ServerManagementService) DeleteNode(id int) error {
 		return err
 	}
 	var pending int64
-	if err := database.GetDB().Model(&model.SyncTask{}).Where("node_id = ? AND status = ?", id, "pending").Count(&pending).Error; err != nil {
+	if err := database.GetDB().Model(&model.SyncTask{}).Where("node_id = ? AND status IN ?", id, []string{"pending", "inflight"}).Count(&pending).Error; err != nil {
 		return err
 	}
 	if pending > 0 {
@@ -256,13 +269,28 @@ func (s *ServerManagementService) DeleteNode(id int) error {
 	var listed struct {
 		Inbounds []model.Inbound `json:"inbounds"`
 	}
-	if err := s.call(&node, http.MethodGet, "/inbounds", nil, "", &listed); err != nil {
-		return fmt.Errorf("读取被控端账号失败: %w", err)
+	ctx, cancel := context.WithTimeout(context.Background(), nodeDeleteTimeout)
+	defer cancel()
+	managerMu.Unlock()
+	listErr := s.callContext(ctx, &node, http.MethodGet, "/inbounds", nil, "", &listed)
+	managerMu.Lock()
+	if listErr != nil {
+		return fmt.Errorf("读取被控端账号失败: %w", listErr)
 	}
 	for _, in := range listed.Inbounds {
-		if err := s.call(&node, http.MethodDelete, "/inbounds/"+strconv.Itoa(in.Port), map[string]int{"accountId": in.ManagerAccountID}, operationID(), nil); err != nil {
-			return fmt.Errorf("删除被控端端口 %d 失败，节点仍保留在管理端: %w", in.Port, err)
+		managerMu.Unlock()
+		deleteErr := s.callContext(ctx, &node, http.MethodDelete, "/inbounds/"+strconv.Itoa(in.Port), map[string]int{"accountId": in.ManagerAccountID}, operationID(), nil)
+		managerMu.Lock()
+		if deleteErr != nil {
+			return fmt.Errorf("删除被控端端口 %d 失败，节点仍保留在管理端: %w", in.Port, deleteErr)
 		}
+	}
+	// Local edits may have queued new work while remote deletion was running.
+	if err := database.GetDB().Model(&model.SyncTask{}).Where("node_id = ? AND status IN ?", id, []string{"pending", "inflight"}).Count(&pending).Error; err != nil {
+		return err
+	}
+	if pending > 0 {
+		return fmt.Errorf("删除期间产生了 %d 个待同步任务，节点仍保留在管理端", pending)
 	}
 	return database.GetDB().Transaction(func(tx *gorm.DB) error {
 		if err := preserveHistoricalNodeName(tx, id, node.Name); err != nil {
@@ -281,6 +309,8 @@ func (s *ServerManagementService) DeleteNode(id int) error {
 // ForceDeleteNode is an explicit offline detach. It cannot discard an
 // unfinished monthly reset because that would silently falsify the archive.
 func (s *ServerManagementService) ForceDeleteNode(id int) error {
+	managerRemoteMu.Lock()
+	defer managerRemoteMu.Unlock()
 	managerMu.Lock()
 	defer managerMu.Unlock()
 	var node model.ManagedNode
@@ -288,7 +318,7 @@ func (s *ServerManagementService) ForceDeleteNode(id int) error {
 		return err
 	}
 	var monthly int64
-	if err := database.GetDB().Model(&model.SyncTask{}).Where("node_id = ? AND kind = ? AND status = ?", id, "reset", "pending").Count(&monthly).Error; err != nil {
+	if err := database.GetDB().Model(&model.SyncTask{}).Where("node_id = ? AND kind = ? AND status IN ?", id, "reset", []string{"pending", "inflight"}).Count(&monthly).Error; err != nil {
 		return err
 	}
 	if monthly > 0 {
@@ -530,8 +560,15 @@ func (s *ServerManagementService) DeleteSyncedInbound(inbound *model.Inbound) er
 }
 
 func (s *ServerManagementService) DispatchPending() error {
+	managerRemoteMu.Lock()
+	defer managerRemoteMu.Unlock()
 	managerMu.Lock()
 	defer managerMu.Unlock()
+	// A previous process may have exited during a remote request. Only one
+	// dispatcher runs at a time, so these claims are safe to retry here.
+	if err := database.GetDB().Model(&model.SyncTask{}).Where("status = ?", "inflight").Update("status", "pending").Error; err != nil {
+		return err
+	}
 	var tasks []model.SyncTask
 	// Filter inactive nodes before LIMIT: skipped tasks must not occupy the
 	// first page forever. Explicit resets and their enable steps still run.
@@ -544,7 +581,13 @@ func (s *ServerManagementService) DispatchPending() error {
 	type accountKey struct{ nodeID, accountID int }
 	blocked := map[accountKey]bool{}
 	var failures []string
+	started := time.Now()
 	for _, task := range tasks {
+		// Leave the remainder for the next scheduled run. A large or offline
+		// node must not hold up every caller behind hundreds of HTTP timeouts.
+		if time.Since(started) >= syncDispatchBudget {
+			break
+		}
 		key := accountKey{task.NodeID, task.AccountID}
 		if blocked[key] {
 			continue
@@ -592,6 +635,12 @@ func (s *ServerManagementService) DispatchPending() error {
 		case "reset":
 			method, path = "POST", path+"/traffic/reset"
 		}
+		// Claim before releasing managerMu. New upserts will create a later
+		// pending task instead of replacing this request's payload in place.
+		if err := database.GetDB().Model(&task).Update("status", "inflight").Error; err != nil {
+			return err
+		}
+		managerMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), syncAttemptTimeout)
 		var result json.RawMessage
 		err := s.callContext(ctx, &node, method, path, json.RawMessage(task.Payload), task.OperationID, &result)
@@ -638,6 +687,7 @@ func (s *ServerManagementService) DispatchPending() error {
 			}
 		}
 		cancel()
+		managerMu.Lock()
 		if err == nil && task.Kind == "reset" && strings.HasPrefix(task.OperationID, "reset-") {
 			var usage struct {
 				Up   int64 `json:"up"`
@@ -669,6 +719,20 @@ func (s *ServerManagementService) DispatchPending() error {
 				UpdateColumns(map[string]interface{}{"up": 0, "down": 0}).Error
 		}
 		if err != nil {
+			if task.Kind == "upsert" {
+				var newer int64
+				if countErr := database.GetDB().Model(&model.SyncTask{}).
+					Where("node_id = ? AND account_id = ? AND id > ? AND status = ? AND kind IN ?", task.NodeID, task.AccountID, task.Id, "pending", []string{"upsert", "delete", "disable"}).
+					Count(&newer).Error; countErr != nil {
+					return countErr
+				}
+				if newer > 0 {
+					if updateErr := database.GetDB().Model(&task).Updates(map[string]interface{}{"status": "abandoned", "error": "已由更新的同步任务取代"}).Error; updateErr != nil {
+						return updateErr
+					}
+					continue
+				}
+			}
 			blocked[key] = true
 			failures = append(failures, fmt.Sprintf("%s: %v", node.Name, err))
 			attempts := task.Attempts + 1

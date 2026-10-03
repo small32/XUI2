@@ -193,6 +193,7 @@ class AllSetting {
         this.webBasePath = "/";
         this.xrayTemplateConfig = "";
         this.restrictedLoginEnable = false;
+        this.localSettingEnable = false;
         this.externalHost = "";
 
         this.timeLocation = "Asia/Shanghai";

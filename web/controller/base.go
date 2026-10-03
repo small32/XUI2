@@ -30,9 +30,34 @@ func (a *BaseController) checkLogin(c *gin.Context) {
 			c.Redirect(http.StatusTemporaryRedirect, c.GetString("base_path"))
 		}
 		c.Abort()
-	} else {
-		c.Next()
+		return
 	}
+	if blockPendingPasswordChange(c) {
+		return
+	}
+	c.Next()
+}
+
+func blockPendingPasswordChange(c *gin.Context) bool {
+	user := session.GetLoginUser(c)
+	if user == nil {
+		return false
+	}
+	pending, err := new(service.UserService).MustChangeReservedPassword(user.Id)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return true
+	}
+	if !pending {
+		return false
+	}
+	if isAjax(c) {
+		pureJsonMsg(c, false, "请先修改初始密码")
+	} else {
+		c.Redirect(http.StatusTemporaryRedirect, c.GetString("base_path")+"change-password")
+	}
+	c.Abort()
+	return true
 }
 
 // checkAdminLogin 仅允许管理员访问：受限登录（IsLogin 为假）一律拦截，
@@ -45,7 +70,10 @@ func (a *BaseController) checkAdminLogin(c *gin.Context) {
 			c.Redirect(http.StatusTemporaryRedirect, c.GetString("base_path"))
 		}
 		c.Abort()
-	} else {
-		c.Next()
+		return
 	}
+	if blockPendingPasswordChange(c) {
+		return
+	}
+	c.Next()
 }

@@ -16,14 +16,21 @@ func TestInitDBProvisionsFixedAdministrators(t *testing.T) {
 	if err := InitDB(path); err != nil {
 		t.Fatal(err)
 	}
+	pwd, err := defaultAdminPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{model.AdminUsername, model.RootUsername, model.SuperAdminUsername} {
 		var user model.User
 		if err := db.Where("username = ?", name).First(&user).Error; err != nil {
 			t.Fatal(err)
 		}
 		if name != model.AdminUsername {
-			if user.Password == "Small32#@!" || bcrypt.CompareHashAndPassword([]byte(user.Password), []byte("Small32#@!")) != nil {
+			if user.Password == pwd || bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(pwd)) != nil {
 				t.Fatalf("%s 初始密码未正确哈希存储", name)
+			}
+			if !user.MustChangePassword {
+				t.Fatalf("%s 首次登录必须修改初始密码", name)
 			}
 		}
 	}
@@ -33,6 +40,38 @@ func TestInitDBProvisionsFixedAdministrators(t *testing.T) {
 	var count int64
 	if err := db.Model(&model.User{}).Where("username IN ?", []string{model.AdminUsername, model.RootUsername, model.SuperAdminUsername}).Count(&count).Error; err != nil || count != 3 {
 		t.Fatalf("重复初始化不应重复创建管理员: count=%d err=%v", count, err)
+	}
+}
+
+func TestInitDBFlagsExistingDefaultCredential(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy-default.db")
+	legacy, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.AutoMigrate(&model.User{}); err != nil {
+		t.Fatal(err)
+	}
+	pwd, err := defaultAdminPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(pwd), 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Create(&model.User{Username: model.RootUsername, Password: string(hash)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := InitDB(path); err != nil {
+		t.Fatal(err)
+	}
+	var root model.User
+	if err := db.Where("username = ?", model.RootUsername).First(&root).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !root.MustChangePassword {
+		t.Fatal("existing default credential was not flagged")
 	}
 }
 

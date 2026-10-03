@@ -19,9 +19,10 @@ const (
 )
 
 type User struct {
-	Id       int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+	Id                 int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	Username           string `json:"username"`
+	Password           string `json:"password"`
+	MustChangePassword bool   `json:"-" gorm:"column:must_change_password;default:false"`
 }
 
 const (

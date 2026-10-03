@@ -266,6 +266,8 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
 // 独立于 UpdateInbound：编辑入站时不应覆盖已累加的流量，
 // 而重置是一个显式清零动作，走独立的写库路径。
 func (s *InboundService) ResetTraffic(id int) error {
+	agentMonthlyMu.Lock()
+	defer agentMonthlyMu.Unlock()
 	return database.GetDB().Model(&model.Inbound{}).
 		Where("id = ?", id).
 		UpdateColumns(map[string]interface{}{"up": 0, "down": 0}).
@@ -276,6 +278,10 @@ func (s *InboundService) AddTraffic(traffics []*xray.Traffic) (err error) {
 	if len(traffics) == 0 {
 		return nil
 	}
+	// Serialize sampling with agent monthly snapshots and explicit resets.
+	// Otherwise an increment between the snapshot read and zeroing disappears.
+	agentMonthlyMu.Lock()
+	defer agentMonthlyMu.Unlock()
 	db := database.GetDB()
 	db = db.Model(model.Inbound{})
 	tx := db.Begin()

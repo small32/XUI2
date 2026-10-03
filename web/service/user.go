@@ -106,6 +106,49 @@ func (s *UserService) UpdateUser(id int, username string, password string) error
 	return nil
 }
 
+// MustChangeReservedPassword reads the current database flag, so an existing
+// session cannot bypass a newly required password change.
+func (s *UserService) MustChangeReservedPassword(id int) (bool, error) {
+	var user model.User
+	if err := database.GetDB().First(&user, id).Error; err != nil {
+		return false, err
+	}
+	return (user.Username == model.RootUsername || user.Username == model.SuperAdminUsername) && user.MustChangePassword, nil
+}
+
+func (s *UserService) ChangeReservedPassword(id int, oldPassword, newPassword string) error {
+	var user model.User
+	if err := database.GetDB().First(&user, id).Error; err != nil {
+		return err
+	}
+	if (user.Username != model.RootUsername && user.Username != model.SuperAdminUsername) || !user.MustChangePassword {
+		return errors.New("该账号不需要首次修改密码")
+	}
+	if ok, _ := VerifyPassword(user.Password, oldPassword); !ok {
+		return errors.New("原密码错误")
+	}
+	if len(newPassword) < 12 {
+		return errors.New("新密码至少需要 12 个字符")
+	}
+	if newPassword == oldPassword {
+		return errors.New("新密码不能与原密码相同")
+	}
+	hashed, err := HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+	result := database.GetDB().Model(&model.User{}).
+		Where("id = ? AND password = ? AND must_change_password = ?", user.Id, user.Password, true).
+		Updates(map[string]interface{}{"password": hashed, "must_change_password": false})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("密码已变化，请重新登录")
+	}
+	return nil
+}
+
 func (s *UserService) UpdateFirstUser(username string, password string) error {
 	if username != model.AdminUsername {
 		return errors.New("管理员用户名固定为 admin")

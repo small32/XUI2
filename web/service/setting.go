@@ -57,6 +57,7 @@ var defaultValueMap = map[string]string{
 	"webBasePath":           "/",
 	"timeLocation":          "Asia/Shanghai",
 	"restrictedLoginEnable": "true",
+	"localSettingEnable":    "false",
 	"externalHost":          "",
 }
 
@@ -464,4 +465,9 @@ func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 		}
 	}
 	return common.Combine(errs...)
+}
+
+// IsLocalSettingEnabled controls local inbound editing on agents.
+func (s *SettingService) IsLocalSettingEnabled() (bool, error) {
+	return s.getBool("localSettingEnable")
 }

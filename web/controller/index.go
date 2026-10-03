@@ -89,6 +89,8 @@ func (a *IndexController) initRouter(g *gin.RouterGroup) {
 	g.GET("/", a.index)
 	g.POST("/login", a.login)
 	g.GET("/logout", a.logout)
+	g.GET("/change-password", a.changePasswordPage)
+	g.POST("/change-password", a.changePassword)
 }
 
 func (a *IndexController) index(c *gin.Context) {
@@ -166,4 +168,49 @@ func (a *IndexController) logout(c *gin.Context) {
 	}
 	session.ClearSession(c)
 	c.Redirect(http.StatusTemporaryRedirect, c.GetString("base_path"))
+}
+
+func (a *IndexController) changePasswordPage(c *gin.Context) {
+	if !session.IsAdminLogin(c) {
+		c.Redirect(http.StatusTemporaryRedirect, c.GetString("base_path"))
+		return
+	}
+	user := session.GetLoginUser(c)
+	pending, err := a.userService.MustChangeReservedPassword(user.Id)
+	if err != nil {
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+	if !pending {
+		c.Redirect(http.StatusTemporaryRedirect, c.GetString("base_path")+"xui/")
+		return
+	}
+	html(c, "change_password.html", "首次登录：修改密码", nil)
+}
+
+func (a *IndexController) changePassword(c *gin.Context) {
+	if !session.IsAdminLogin(c) {
+		pureJsonMsg(c, false, "请先登录")
+		return
+	}
+	var form struct {
+		OldPassword string `json:"oldPassword" form:"oldPassword"`
+		NewPassword string `json:"newPassword" form:"newPassword"`
+	}
+	if err := c.ShouldBind(&form); err != nil {
+		pureJsonMsg(c, false, "数据格式错误")
+		return
+	}
+	user := session.GetLoginUser(c)
+	if err := a.userService.ChangeReservedPassword(user.Id, form.OldPassword, form.NewPassword); err != nil {
+		jsonMsg(c, "修改密码", err)
+		return
+	}
+	refreshed := a.userService.CheckUser(user.Username, form.NewPassword)
+	if refreshed == nil {
+		session.ClearSession(c)
+		pureJsonMsg(c, false, "密码已修改，请重新登录")
+		return
+	}
+	jsonMsg(c, "修改密码", session.SetLoginUser(c, refreshed))
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,6 +17,152 @@ import (
 	"xui/database/model"
 	"xui/util/common"
 )
+
+func TestSlowDispatchAllowsQueueAndPreservesNewerUpsert(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	var mu sync.Mutex
+	var remarks []string
+	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/capabilities" {
+			w.Write([]byte(`{"apiVersion":1}`))
+			return
+		}
+		var in model.Inbound
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			t.Error(err)
+		}
+		if in.Remark == "old" {
+			select {
+			case <-started:
+			default:
+				close(started)
+			}
+			<-release
+		}
+		mu.Lock()
+		remarks = append(remarks, in.Remark)
+		mu.Unlock()
+		if in.Remark == "old" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte(`{"error":"outdated configuration failed"}`))
+			return
+		}
+		w.Write([]byte(`{"applied":true}`))
+	}))
+	defer agent.Close()
+	s := new(ServerManagementService)
+	if err := s.SaveNode(testNodeInput(agent, true)); err != nil {
+		t.Fatal(err)
+	}
+	in := model.Inbound{Port: 43339, Protocol: model.Trojan, Settings: `{}`, StreamSettings: `{}`, Sniffing: `{}`, Tag: "inbound-43339", Remark: "old"}
+	if err := database.GetDB().Create(&in).Error; err != nil {
+		t.Fatal(err)
+	}
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- s.SyncInbound(&in, 0, true) }()
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first remote request did not start")
+	}
+	if !managerMu.TryLock() {
+		t.Fatal("remote request still holds managerMu")
+	}
+	managerMu.Unlock()
+	in.Remark = "new"
+	if err := database.GetDB().Model(&in).Update("remark", in.Remark).Error; err != nil {
+		t.Fatal(err)
+	}
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- s.SyncInbound(&in, 0, false) }()
+	deadline := time.After(5 * time.Second)
+	for {
+		var count int64
+		if err := database.GetDB().Model(&model.SyncTask{}).Where("kind = ? AND status = ?", "upsert", "pending").Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count == 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("new upsert was not queued while remote was slow")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	close(release)
+	if err := <-firstDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-secondDone; err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(remarks) != 2 || remarks[0] != "old" || remarks[1] != "new" {
+		t.Fatalf("upsert order lost: %v", remarks)
+	}
+}
+
+func TestDispatchRecoversClaimLeftByPreviousProcess(t *testing.T) {
+	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
+		t.Fatal(err)
+	}
+	var applied atomic.Int32
+	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/v1/capabilities" {
+			w.Write([]byte(`{"apiVersion":1}`))
+			return
+		}
+		applied.Add(1)
+		w.Write([]byte(`{"applied":true}`))
+	}))
+	defer agent.Close()
+	s := new(ServerManagementService)
+	if err := s.SaveNode(testNodeInput(agent, true)); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := s.Nodes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := model.Inbound{Port: 43339, Protocol: model.Trojan, Settings: `{}`, StreamSettings: `{}`, Sniffing: `{}`, Tag: "inbound-43339"}
+	if err := database.GetDB().Create(&in).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := enqueue(database.GetDB(), nodes[0].Id, &in, "upsert", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.GetDB().Model(&model.SyncTask{}).Where("account_id = ?", in.Id).Update("status", "inflight").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DispatchPending(); err != nil {
+		t.Fatal(err)
+	}
+	if applied.Load() != 1 {
+		t.Fatalf("orphaned task was not retried: %d", applied.Load())
+	}
+	var pending int64
+	if err := database.GetDB().Model(&model.SyncTask{}).Where("status <> ?", "done").Count(&pending).Error; err != nil {
+		t.Fatal(err)
+	}
+	if pending != 0 {
+		t.Fatalf("orphaned task remains unfinished: %d", pending)
+	}
+}
 
 func testNodeInput(server *httptest.Server, enabled bool) NodeInput {
 	pin := sha256.Sum256(server.Certificate().Raw)

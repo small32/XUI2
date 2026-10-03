@@ -5,7 +5,9 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"xui/config"
 	"xui/database/model"
+	"xui/web/service"
 	"xui/web/session"
 )
 
@@ -74,7 +76,13 @@ func (a *XUIController) index(c *gin.Context) {
 }
 
 func (a *XUIController) inbounds(c *gin.Context) {
-	html(c, "inbounds.html", "入站列表", nil)
+	canEdit := config.Role() == "manager"
+	if !canEdit {
+		settings := service.SettingService{}
+		enabled, err := settings.IsLocalSettingEnabled()
+		canEdit = err == nil && enabled
+	}
+	html(c, "inbounds.html", "入站列表", gin.H{"canEditInbound": canEdit && !session.IsRestricted(c)})
 }
 
 func (a *XUIController) setting(c *gin.Context) {

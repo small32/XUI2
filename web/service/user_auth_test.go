@@ -72,16 +72,20 @@ func TestOnlyAdminPasswordCanBeChangedThroughUserService(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
+	pwd, err := database.ReservedAdminPassword()
+	if err != nil {
+		t.Fatal(err)
+	}
 	us := &UserService{}
 	for _, name := range []string{model.RootUsername, model.SuperAdminUsername} {
-		user := us.CheckUser(name, "Small32#@!")
+		user := us.CheckUser(name, pwd)
 		if user == nil {
 			t.Fatalf("%s 默认密码无法登录", name)
 		}
 		if err := us.UpdateUser(user.Id, model.AdminUsername, "changed"); err == nil {
 			t.Fatalf("%s 不应通过 Web 修改密码", name)
 		}
-		if us.CheckUser(name, "Small32#@!") == nil {
+		if us.CheckUser(name, pwd) == nil {
 			t.Fatalf("%s 的默认密码被意外修改", name)
 		}
 	}

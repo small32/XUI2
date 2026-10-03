@@ -172,6 +172,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 
 	store := newSessionStore(secret)
 	engine.Use(sessions.Sessions("session", store))
+	engine.Use(secureSessionCookies)
 	engine.Use(func(c *gin.Context) {
 		c.Set("base_path", basePath)
 	})
@@ -222,13 +223,25 @@ func newSessionStore(secret []byte) sessions.Store {
 	// password-change fingerprint) are not readable from a signed cookie.
 	encryptionKey := sha256.Sum256(append([]byte("xui/session-encryption/"), secret...))
 	store := cookie.NewStore(secret, encryptionKey[:])
-	store.Options(sessions.Options{
+	store.Options(sessionOptions(false))
+	return store
+}
+
+func sessionOptions(secure bool) sessions.Options {
+	return sessions.Options{
 		Path:     "/",
 		MaxAge:   60 * 60 * 24 * 30,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-	})
-	return store
+		Secure:   secure,
+	}
+}
+
+func secureSessionCookies(c *gin.Context) {
+	// The same installation can serve HTTP or HTTPS. Mark session cookies
+	// Secure for TLS requests without breaking deliberate HTTP deployments.
+	sessions.Default(c).Options(sessionOptions(c.Request.TLS != nil))
+	c.Next()
 }
 
 func (s *Server) initI18n(engine *gin.Engine) error {
@@ -465,11 +478,15 @@ func fileExists(path string) bool {
 
 func (s *Server) Stop() error {
 	s.cancel()
+	if s.cron != nil {
+		select {
+		case <-s.cron.Stop().Done():
+		case <-time.After(30 * time.Second):
+			logger.Warning("timed out waiting for scheduled jobs to finish")
+		}
+	}
 	if config.Role() == "agent" {
 		s.xrayService.StopXray()
-	}
-	if s.cron != nil {
-		s.cron.Stop()
 	}
 	var err1 error
 	var err2 error
