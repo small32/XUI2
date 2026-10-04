@@ -519,6 +519,11 @@ ssl_cert_issue() {
         else
             LOGI "证书签发成功,安装中..."
         fi
+        # 在安装证书重启面板前升级，避免下载碰上本机 Xray 代理重启。
+        # 客户端升级失败不应阻断已签发证书的安装和续期调度。
+        if ! "$acme_sh" --upgrade --auto-upgrade; then
+            LOGI "acme.sh 客户端升级失败，保留现有版本并继续安装证书及配置自动续期"
+        fi
         # --reloadcmd：acme.sh 每次安装/续签证书后自动执行，重启面板以加载新证书。
         if ! "$acme_sh" --installcert -d "${CF_Domain}" --ca-file "${certPath}/ca.cer" \
             --cert-file "${certPath}/${CF_Domain}.cer" --key-file "${certPath}/fullchain.key" \
@@ -528,10 +533,6 @@ ssl_cert_issue() {
             exit 1
         else
             LOGI "证书安装成功,设置自动续期..."
-        fi
-        # 客户端升级需要下载 GitHub 归档，失败不应阻断已签发证书的续期调度。
-        if ! "$acme_sh" --upgrade --auto-upgrade; then
-            LOGI "acme.sh 客户端升级失败，保留现有版本并继续配置证书自动续期"
         fi
         # 取消 acme.sh 自带的定时任务：续期改由下面的 systemd timer 调度，
         # 不再让 acme.sh 往 root 的 crontab 里写任务。
