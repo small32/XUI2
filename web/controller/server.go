@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"time"
 	"xui/config"
+	"xui/logger"
 	"xui/web/global"
 	"xui/web/service"
 )
@@ -56,6 +57,16 @@ func (a *ServerController) refreshStatus() {
 func (a *ServerController) startTask() {
 	webServer := global.GetWebServer()
 	c := webServer.GetCron()
+	if config.Role() == "agent" {
+		if err := service.SampleHostNetwork(); err != nil {
+			logger.Warning("采集系统网卡流量失败: ", err)
+		}
+		c.AddFunc("@every 10s", func() {
+			if err := service.SampleHostNetwork(); err != nil {
+				logger.Warning("采集系统网卡流量失败: ", err)
+			}
+		})
+	}
 	c.AddFunc("@every 2s", func() {
 		a.mu.RLock()
 		last := a.lastGetStatusTime

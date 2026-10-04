@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"xui/config"
 	"xui/database"
 	"xui/database/model"
 	"xui/logger"
@@ -22,6 +23,7 @@ import (
 	"xui/util/random"
 	"xui/util/reflect_util"
 	"xui/web/entity"
+	"xui/xray"
 )
 
 //go:embed config.json
@@ -59,6 +61,9 @@ var defaultValueMap = map[string]string{
 	"restrictedLoginEnable": "true",
 	"localSettingEnable":    "false",
 	"externalHost":          "",
+	"upstreamEnabled":       "false",
+	"upstreamConfig":        "",
+	"localProxyEnable":      "false",
 }
 
 type SettingService struct {
@@ -449,6 +454,15 @@ func (s *SettingService) GetTimeLocation() (*time.Location, error) {
 func (s *SettingService) UpdateAllSetting(allSetting *entity.AllSetting) error {
 	if err := allSetting.CheckValid(); err != nil {
 		return err
+	}
+	if allSetting.LocalProxyEnable && config.Role() == "agent" {
+		var count int64
+		if err := database.GetDB().Model(&model.Inbound{}).Where("port IN ?", []int{xray.LocalHTTPPort, xray.LocalSOCKSPort}).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return fmt.Errorf("本机代理端口 10808/10809 与现有入站冲突，请先选择其他入站端口")
+		}
 	}
 
 	v := reflect.ValueOf(allSetting).Elem()

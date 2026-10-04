@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sync"
+	"xui/config"
 	"xui/logger"
 	"xui/xray"
 
@@ -17,9 +18,9 @@ import (
 //
 // 注意：此锁不可重入，已持锁的代码只能调用带 Locked 后缀的内部函数。
 var (
-	lock             sync.RWMutex
-	p                *xray.Process
-	result           string
+	lock              sync.RWMutex
+	p                 *xray.Process
+	result            string
 	processGeneration uint64
 )
 
@@ -39,6 +40,35 @@ func (s *XrayService) IsXrayRunning() bool {
 	lock.RLock()
 	defer lock.RUnlock()
 	return isXrayRunningLocked()
+}
+
+func (s *XrayService) UpstreamStatus() (running, local bool) {
+	lock.RLock()
+	defer lock.RUnlock()
+	if !isXrayRunningLocked() {
+		return false, false
+	}
+	var outbounds []struct {
+		Tag string `json:"tag"`
+	}
+	if json.Unmarshal(p.GetConfig().OutboundConfigs, &outbounds) != nil {
+		return false, false
+	}
+	for _, out := range outbounds {
+		if out.Tag == xray.UpstreamTag {
+			running = true
+			break
+		}
+	}
+	if running {
+		for _, in := range p.GetConfig().InboundConfigs {
+			if in.Tag == xray.LocalHTTPTag {
+				local = true
+				break
+			}
+		}
+	}
+	return
 }
 
 func (s *XrayService) GetXrayErr() error {
@@ -99,6 +129,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 		return nil, err
 	}
 	for _, inbound := range inbounds {
+		if config.Role() == "manager" {
+			break
+		}
 		if !inbound.Enable {
 			continue
 		}
@@ -153,7 +186,19 @@ func (s *XrayService) RestartXray(isForce bool) error {
 	p = xray.NewProcess(xrayConfig)
 	processGeneration++
 	result = ""
-	return p.Start()
+	if err := p.Start(); err != nil {
+		_ = ApplySystemProxy(false)
+		return err
+	}
+	settings, err := s.settingService.GetAllSetting()
+	if err != nil {
+		return err
+	}
+	if err := ApplySystemProxy(settings.LocalProxyEnable); err != nil {
+		_ = ApplySystemProxy(false)
+		return err
+	}
+	return nil
 }
 
 func (s *XrayService) StopXray() error {

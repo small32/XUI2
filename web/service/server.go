@@ -10,7 +10,6 @@ import (
 	"github.com/shirou/gopsutil/host"
 	"github.com/shirou/gopsutil/load"
 	"github.com/shirou/gopsutil/mem"
-	"github.com/shirou/gopsutil/net"
 	"io"
 	"io/fs"
 	"net/http"
@@ -20,6 +19,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"xui/config"
 	"xui/logger"
 	"xui/util/sys"
 	"xui/xray"
@@ -34,9 +34,11 @@ const (
 )
 
 type Status struct {
-	T   time.Time `json:"-"`
-	Cpu float64   `json:"cpu"`
-	Mem struct {
+	NetworkCounters map[string]NetworkCounter `json:"-"`
+	MonthTraffic    HostMonthTraffic          `json:"monthTraffic"`
+	T               time.Time                 `json:"-"`
+	Cpu             float64                   `json:"cpu"`
+	Mem             struct {
 		Current uint64 `json:"current"`
 		Total   uint64 `json:"total"`
 	} `json:"mem"`
@@ -126,24 +128,31 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 		status.Loads = []float64{avgState.Load1, avgState.Load5, avgState.Load15}
 	}
 
-	ioStats, err := net.IOCounters(false)
+	ioStats, err := collectNetworkCounters()
 	if err != nil {
 		logger.Warning("get io counters failed:", err)
-	} else if len(ioStats) > 0 {
-		ioStat := ioStats[0]
-		status.NetTraffic.Sent = ioStat.BytesSent
-		status.NetTraffic.Recv = ioStat.BytesRecv
+	} else {
+		status.NetworkCounters = ioStats
+		for _, ioStat := range ioStats {
+			status.NetTraffic.Sent += ioStat.Sent
+			status.NetTraffic.Recv += ioStat.Recv
+		}
 
 		if lastStatus != nil {
 			duration := now.Sub(lastStatus.T)
 			seconds := float64(duration) / float64(time.Second)
-			up := uint64(float64(status.NetTraffic.Sent-lastStatus.NetTraffic.Sent) / seconds)
-			down := uint64(float64(status.NetTraffic.Recv-lastStatus.NetTraffic.Recv) / seconds)
-			status.NetIO.Up = up
-			status.NetIO.Down = down
+			if seconds > 0 {
+				up, down := networkDelta(ioStats, lastStatus.NetworkCounters)
+				status.NetIO.Up = uint64(float64(up) / seconds)
+				status.NetIO.Down = uint64(float64(down) / seconds)
+			}
 		}
-	} else {
-		logger.Warning("can not find io counters")
+	}
+	if config.Role() == "agent" {
+		status.MonthTraffic, err = readHostMonthTraffic(now)
+		if err != nil {
+			logger.Warning("get monthly host network traffic failed:", err)
+		}
 	}
 
 	status.TcpCount, err = sys.GetTCPCount()

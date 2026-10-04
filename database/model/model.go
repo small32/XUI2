@@ -9,6 +9,17 @@ import (
 
 type Protocol string
 
+// HostNetworkMonth tracks machine NIC traffic independently of inbound account quotas.
+type HostNetworkMonth struct {
+	Month         string `gorm:"primaryKey;size:6"`
+	Sent          uint64
+	Recv          uint64
+	ObservedSince int64
+	SampledAt     int64
+	BootTime      uint64
+	Counters      string
+}
+
 const (
 	VMess       Protocol = "vmess"
 	VLESS       Protocol = "vless"

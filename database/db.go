@@ -132,7 +132,7 @@ func initTrafficSnapshot() error {
 }
 
 func initManagement() error {
-	return db.AutoMigrate(&model.ManagedNode{}, &model.NodeTraffic{}, &model.SyncTask{}, &model.AgentOperation{}, &model.AgentMonthlySnapshot{}, &model.NodeTrafficSnapshot{})
+	return db.AutoMigrate(&model.ManagedNode{}, &model.NodeTraffic{}, &model.SyncTask{}, &model.AgentOperation{}, &model.AgentMonthlySnapshot{}, &model.NodeTrafficSnapshot{}, &model.HostNetworkMonth{})
 }
 
 func InitDB(dbPath string) error {

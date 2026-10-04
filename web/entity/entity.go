@@ -34,6 +34,9 @@ type AllSetting struct {
 	WebKeyFile         string `json:"webKeyFile" form:"webKeyFile"`
 	WebBasePath        string `json:"webBasePath" form:"webBasePath"`
 	XrayTemplateConfig string `json:"xrayTemplateConfig" form:"xrayTemplateConfig"`
+	UpstreamEnabled    bool   `json:"upstreamEnabled" form:"upstreamEnabled"`
+	UpstreamConfig     string `json:"upstreamConfig" form:"upstreamConfig"`
+	LocalProxyEnable   bool   `json:"localProxyEnable" form:"localProxyEnable"`
 
 	// LocalSettingEnable 允许被控端管理员编辑本地入站设置，默认关闭。
 	LocalSettingEnable bool `json:"localSettingEnable" form:"localSettingEnable"`
@@ -86,6 +89,11 @@ func (s *AllSetting) CheckValid() error {
 	if err != nil {
 		return common.NewError("xray template config invalid:", err)
 	}
+	generated, err := xray.BuildUpstreamTemplate(s.XrayTemplateConfig, s.UpstreamConfig, s.UpstreamEnabled, s.LocalProxyEnable)
+	if err != nil {
+		return err
+	}
+	s.XrayTemplateConfig = generated
 
 	_, err = time.LoadLocation(s.TimeLocation)
 	if err != nil {

@@ -80,6 +80,18 @@
                             <a-tag color="blue" @click="openSelectV2rayVersion">切换版本</a-tag>
                         </a-card>
                     </a-col>{{end}}
+                    {{if eq .role "agent"}}<a-col :sm="24" :md="12">
+                        <a-card hoverable title="网络流量">
+                            <div>当前上传速度：[[ sizeFormat(status.netIO.up) ]]/s</div>
+                            <div>当前下载速度：[[ sizeFormat(status.netIO.down) ]]/s</div>
+                            <div>本月上传：[[ status.monthTraffic.ready ? sizeFormat(status.monthTraffic.sent) : '采集中' ]]</div>
+                            <div>本月下载：[[ status.monthTraffic.ready ? sizeFormat(status.monthTraffic.recv) : '采集中' ]]</div>
+                            <a-tooltip>
+                                <template slot="title">按服务器非回环网卡统计，包括本机代理流量。每 10 秒累计，重启保留，按上海时区切换月份；首次启用前的历史用量无法追溯。</template>
+                                <span style="color:#888;font-size:12px">[[status.monthTraffic.month]] · 服务器整体流量 <a-icon type="info-circle"></a-icon></span>
+                            </a-tooltip>
+                        </a-card>
+                    </a-col>{{end}}
                     <a-col :sm="24" :md="12">
                         <a-card hoverable>
                             运行时间:
@@ -158,6 +170,7 @@
             this.mem = new CurTotal(0, 0);
             this.netIO = {up: 0, down: 0};
             this.netTraffic = {sent: 0, recv: 0};
+            this.monthTraffic = {month:'',sent:0,recv:0,ready:false};
             this.swap = new CurTotal(0, 0);
             this.tcpCount = 0;
             this.udpCount = 0;
@@ -173,6 +186,7 @@
             this.mem = new CurTotal(data.mem.current, data.mem.total);
             this.netIO = data.netIO;
             this.netTraffic = data.netTraffic;
+            this.monthTraffic = data.monthTraffic || {month:'',sent:0,recv:0,ready:false};
             this.swap = new CurTotal(data.swap.current, data.swap.total);
             this.tcpCount = data.tcpCount;
             this.udpCount = data.udpCount;

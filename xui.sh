@@ -22,6 +22,12 @@ function LOGI() {
 # 本文件在本渠道写死本渠道地址：运行期不推断渠道、不回退其他渠道、不读渠道状态文件。
 # 另一渠道的同一文件内容不同；改动本块后必须同步另一渠道的同一文件。
 XUI_RAW_URL="https://raw.githubusercontent.com/small32/XUI2/main"
+# 本机代理由面板启动时生成，菜单下载及 acme.sh 子进程自动使用。
+if [[ -r /etc/xui/local-proxy.env ]]; then
+    set -a
+    . /etc/xui/local-proxy.env
+    set +a
+fi
 # ======================================================
 # check root
 [[ $EUID -ne 0 ]] && LOGE "错误:  请在 root 用户或 sudo 权限下执行此脚本!\n" && exit 1
@@ -136,6 +142,7 @@ uninstall() {
     fi
     systemctl stop xui
     systemctl disable xui
+    rm -f /etc/profile.d/xui-proxy.sh /etc/apt/apt.conf.d/99xui-proxy /etc/systemd/system/xui-ssl.service.d/proxy.conf
     rm /etc/systemd/system/xui.service -f
     systemctl daemon-reload
     systemctl reset-failed
@@ -300,9 +307,45 @@ migrate_v2_ui() {
     before_show_menu
 }
 
+configure_bbr() {
+    LOGI "当前内核: $(uname -r)，架构: $(uname -m)"
+    if [[ "$(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null)" == "bbr" ]]; then
+        LOGI "BBR 已启用，当前队列: $(sysctl -n net.core.default_qdisc 2>/dev/null)，无需重复安装"
+        return 0
+    fi
+    if command -v modprobe >/dev/null 2>&1; then
+        modprobe tcp_bbr 2>/dev/null || true
+    fi
+    if [[ " $(sysctl -n net.ipv4.tcp_available_congestion_control 2>/dev/null) " == *" bbr "* ]]; then
+        if ! sysctl -w net.core.default_qdisc=fq net.ipv4.tcp_congestion_control=bbr; then
+            LOGE "启用 BBR 失败，请检查上面的内核错误"
+            return 1
+        fi
+        mkdir -p /etc/sysctl.d || return 1
+        printf 'net.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n' > /etc/sysctl.d/99-xui-bbr.conf || return 1
+        LOGI "已启用 BBR 并保存开机配置，无需更换内核或重启"
+        return 0
+    fi
+    if [[ -f /etc/armbian-release || "$(uname -m)" != "x86_64" ]]; then
+        LOGE "当前内核不支持 BBR，请使用本设备对应的 Armbian/厂商内核升级工具，升级到支持 CONFIG_TCP_CONG_BBR 的内核后重试"
+        return 1
+    fi
+    local bbr_script
+    bbr_script=$(mktemp) || return 1
+    LOGI "正在下载 BBR 内核安装脚本..."
+    if ! curl -fL --connect-timeout 10 --max-time 120 https://raw.githubusercontent.com/teddysun/across/master/bbr.sh -o "$bbr_script" || [[ ! -s "$bbr_script" ]]; then
+        rm -f "$bbr_script"
+        LOGE "下载 BBR 脚本失败，请检查服务器 DNS 和 GitHub 网络连接"
+        return 1
+    fi
+    bash "$bbr_script"
+    local result=$?
+    rm -f "$bbr_script"
+    return "$result"
+}
+
 install_bbr() {
-    # temporary workaround for installing bbr
-    bash <(curl -L -s https://raw.githubusercontent.com/teddysun/across/master/bbr.sh)
+    configure_bbr
     echo ""
     before_show_menu
 }
@@ -428,14 +471,17 @@ ssl_cert_issue() {
     confirm "我已确认以上内容[y/n]" "y"
     if [ $? -eq 0 ]; then
         local certPath=/root/cert
-        local acme_sh=~/.acme.sh/acme.sh
+        local acme_sh=/root/.acme.sh/acme.sh
         LOGI "安装Acme脚本"
         if [ ! -x "$acme_sh" ]; then
-            curl https://get.acme.sh | sh
-            if [ $? -ne 0 ]; then
-                LOGE "安装acme脚本失败"
-                exit 1
+            if ! (set -o pipefail; curl -fsSL --connect-timeout 10 --max-time 120 https://get.acme.sh | sh); then
+                LOGE "安装acme脚本失败，请检查服务器 DNS 和网络连接"
+                return 1
             fi
+        fi
+        if [[ ! -x "$acme_sh" ]] || ! "$acme_sh" --version; then
+            LOGE "acme.sh 未正确安装到 /root/.acme.sh，请检查安装输出"
+            return 1
         fi
         # 不再清空 /root/cert：新证书由 --installcert 直接覆盖旧文件，
         # 避免签发失败时目录被清空、面板失去可用证书。
@@ -586,7 +632,7 @@ show_menu() {
   ${green}14.${plain} 设置 xui 开机自启
   ${green}15.${plain} 取消 xui 开机自启
 ————————————————
-  ${green}16.${plain} 一键安装 bbr (最新内核)
+  ${green}16.${plain} 一键启用 BBR (优先使用当前内核)
   ${green}17.${plain} 一键申请SSL证书(acme申请)
  "
     show_status

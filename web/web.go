@@ -276,6 +276,26 @@ func (s *Server) initI18n(engine *gin.Engine) error {
 
 func (s *Server) startTask() {
 	if config.Role() == "manager" {
+		settings, err := s.settingService.GetAllSetting()
+		if err != nil {
+			logger.Warning("读取上级配置失败: ", err)
+			return
+		}
+		if settings.UpstreamEnabled {
+			if err := s.xrayService.RestartXray(true); err != nil {
+				logger.Warning("启动本机上级代理失败: ", err)
+			}
+			s.cron.AddJob("@every 30s", job.NewCheckXrayRunningJob())
+			s.cron.AddFunc("@every 30s", func() {
+				if s.xrayService.IsNeedRestartAndSetFalse() {
+					if err := s.xrayService.RestartXray(true); err != nil {
+						logger.Warning("重启本机上级代理失败: ", err)
+					}
+				}
+			})
+		} else if err := service.ApplySystemProxy(false); err != nil {
+			logger.Warning("清理本机代理失败: ", err)
+		}
 		return
 	}
 	if err := service.MaybeAgentMonthlyReset(); err != nil {
@@ -485,7 +505,7 @@ func (s *Server) Stop() error {
 			logger.Warning("timed out waiting for scheduled jobs to finish")
 		}
 	}
-	if config.Role() == "agent" {
+	if s.xrayService.IsXrayRunning() {
 		s.xrayService.StopXray()
 	}
 	var err1 error

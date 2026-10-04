@@ -168,6 +168,9 @@ jobs:
             '支持按账号选择下发节点，以及为不同被控端设置不同协议，账号公共信息与密码保持一致。' \
             '被控端本地入站流量按端口计入共享额度，同端口配置以管理端下发配置为准。' \
             '订阅与二维码使用各被控端的实际协议和连接配置。' \
+            '新增上级服务器配置与本机系统代理，支持 Trojan、VMess、VLESS 和 dokodemo-door 固定目标转发。' \
+            '被控端系统状态同列展示上传下载速度及持久化的当月网卡流量。' \
+            '修复 acme.sh 安装失败误判及 BBR 菜单静默退出，兼容 Armbian 已启用 BBR 的内核。' \
             '安装包支持 Linux amd64 和 arm64，包含 Xray-core v26.3.27。' > notes.md
           gh release create "$VERSION" --target "$COMMIT" --title "XUI2 $VERSION" --notes-file notes.md --draft xui-linux-*.tar.gz SHA256SUMS
           gh release edit "$VERSION" --draft=false --prerelease=false --latest
