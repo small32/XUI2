@@ -6,6 +6,8 @@
 {{template "commonSider" .}}
 <a-layout id="content-layout"><a-layout-content>
 <a-card title="被控端管理">
+<a-tabs default-active-key="management" :destroy-inactive-tab-pane="true">
+<a-tab-pane key="management" tab="被控端管理">
 <a-alert type="info" show-icon style="margin-bottom:16px" message="管理端通过 HTTPS Web API 同步账号并读取流量。被控端令牌只在这里填写，保存后不再回显。更换服务器请先删除旧节点，再添加新节点。"></a-alert>
 <a-table :data-source="nodes" row-key="id" :pagination="false" size="small">
 <a-table-column title="名称" data-index="name"></a-table-column>
@@ -41,9 +43,15 @@
 <a-table :data-source="tasks" row-key="id" size="small" :pagination="{pageSize:10}">
 <a-table-column title="节点 ID" data-index="nodeId"></a-table-column><a-table-column title="端口" data-index="port"></a-table-column><a-table-column title="操作" data-index="kind"></a-table-column><a-table-column title="状态"><template slot-scope="text,row">[[row.status==='abandoned'?'已放弃':'待重试']]</template></a-table-column><a-table-column title="尝试次数" data-index="attempts"></a-table-column><a-table-column title="下次重试"><template slot-scope="text,row">[[row.status==='pending'&&row.nextRetryAt?new Date(row.nextRetryAt*1000).toLocaleString():'-']]</template></a-table-column><a-table-column title="最近错误" data-index="error"></a-table-column>
 </a-table>
+</a-tab-pane>
+<a-tab-pane key="inbounds" tab="被控端入站设置">
+<node-inbound-browser></node-inbound-browser>
+</a-tab-pane>
+</a-tabs>
 </a-card></a-layout-content></a-layout>
 </a-layout>
 {{template "js" .}}
+{{template "nodeInboundBrowser" .}}
 <script>
 const emptyNode=()=>({id:0,name:'',url:'',address:'',token:'',certSha256:'',enabled:true});
 new Vue({delimiters:['[[',']]'],el:'#app',data:{siderDrawer,loading:false,nodes:[],tasks:[],node:emptyNode(),setting:{autoDisable:true,heartbeatMinutes:10}},computed:{pendingCount(){return this.tasks.filter(t=>t.status==='pending').length;},abandonedCount(){return this.tasks.filter(t=>t.status==='abandoned').length;}},methods:{

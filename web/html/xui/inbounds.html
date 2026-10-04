@@ -17,7 +17,6 @@
     {{ template "commonSider" . }}
     <a-layout id="content-layout">
         <a-layout-content>
-            <node-inbound-browser v-if="!restricted && role === 'manager'"></node-inbound-browser>
             <a-spin :spinning="spinning" :delay="500" tip="loading">
                 <transition name="list" appear>
                     <a-tag v-if="false" color="red" style="margin-bottom: 10px">
@@ -139,7 +138,6 @@
     </a-modal>
 </a-layout>
 {{template "js" .}}
-{{template "nodeInboundBrowser" .}}
 <script>
 
     const restricted = {{ .restricted }};
