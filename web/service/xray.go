@@ -42,35 +42,6 @@ func (s *XrayService) IsXrayRunning() bool {
 	return isXrayRunningLocked()
 }
 
-func (s *XrayService) UpstreamStatus() (running, local bool) {
-	lock.RLock()
-	defer lock.RUnlock()
-	if !isXrayRunningLocked() {
-		return false, false
-	}
-	var outbounds []struct {
-		Tag string `json:"tag"`
-	}
-	if json.Unmarshal(p.GetConfig().OutboundConfigs, &outbounds) != nil {
-		return false, false
-	}
-	for _, out := range outbounds {
-		if out.Tag == xray.UpstreamTag {
-			running = true
-			break
-		}
-	}
-	if running {
-		for _, in := range p.GetConfig().InboundConfigs {
-			if in.Tag == xray.LocalHTTPTag {
-				local = true
-				break
-			}
-		}
-	}
-	return
-}
-
 func (s *XrayService) GetXrayErr() error {
 	lock.RLock()
 	defer lock.RUnlock()
@@ -114,6 +85,15 @@ func (s *XrayService) GetXrayVersion() string {
 
 func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 	templateConfig, err := s.settingService.GetXrayConfigTemplate()
+	if err != nil {
+		return nil, err
+	}
+
+	settings, err := s.settingService.GetAllSetting()
+	if err != nil {
+		return nil, err
+	}
+	templateConfig, err = xray.BuildLocalProxyTemplate(templateConfig, settings.LocalProxyEnable)
 	if err != nil {
 		return nil, err
 	}

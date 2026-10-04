@@ -61,8 +61,6 @@ var defaultValueMap = map[string]string{
 	"restrictedLoginEnable": "true",
 	"localSettingEnable":    "false",
 	"externalHost":          "",
-	"upstreamEnabled":       "false",
-	"upstreamConfig":        "",
 	"localProxyEnable":      "false",
 }
 

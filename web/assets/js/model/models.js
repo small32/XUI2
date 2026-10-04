@@ -198,8 +198,6 @@ class AllSetting {
         this.webKeyFile = "";
         this.webBasePath = "/";
         this.xrayTemplateConfig = "";
-		this.upstreamEnabled = false;
-		this.upstreamConfig = "";
 		this.localProxyEnable = false;
         this.restrictedLoginEnable = false;
         this.localSettingEnable = false;

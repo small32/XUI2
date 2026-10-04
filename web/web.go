@@ -281,7 +281,7 @@ func (s *Server) startTask() {
 			logger.Warning("读取上级配置失败: ", err)
 			return
 		}
-		if settings.UpstreamEnabled {
+		if settings.LocalProxyEnable {
 			if err := s.xrayService.RestartXray(true); err != nil {
 				logger.Warning("启动本机上级代理失败: ", err)
 			}

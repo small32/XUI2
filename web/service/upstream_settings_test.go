@@ -10,7 +10,9 @@ import (
 	"xui/xray"
 )
 
-func TestUpstreamSettingsPersistTemplateAndRejectInboundPortConflict(t *testing.T) {
+const manualProxyTemplate = `{"api":{"tag":"api"},"inbounds":[],"outbounds":[{"tag":"to-b","protocol":"trojan","settings":{"servers":[{"address":"example.com","port":443,"password":"secret"}]}}],"routing":{"rules":[{"type":"field","network":"tcp,udp","outboundTag":"to-b"}]}}`
+
+func TestLocalProxySettingsPreserveManualTemplateAndRejectInboundPortConflict(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "upstream.db")); err != nil {
 		t.Fatal(err)
 	}
@@ -25,9 +27,15 @@ func TestUpstreamSettingsPersistTemplateAndRejectInboundPortConflict(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings.UpstreamEnabled = true
 	settings.LocalProxyEnable = true
-	settings.UpstreamConfig = `{"protocol":"trojan","address":"example.com","port":443,"password":"shared","streamSettings":{"security":"tls"}}`
+	settings.XrayTemplateConfig = manualProxyTemplate
+	// Legacy form data must never overwrite the manually edited template.
+	if err := s.saveSetting("upstreamEnabled", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.saveSetting("upstreamConfig", `{"protocol":"trojan","address":"obsolete.example","port":29050,"password":"obsolete"}`); err != nil {
+		t.Fatal(err)
+	}
 	in := model.Inbound{Port: xray.LocalHTTPPort, Tag: "inbound-10809", Protocol: model.Trojan, Settings: `{"clients":[{"password":"keep"}]}`}
 	if err := database.GetDB().Create(&in).Error; err != nil {
 		t.Fatal(err)
@@ -36,7 +44,7 @@ func TestUpstreamSettingsPersistTemplateAndRejectInboundPortConflict(t *testing.
 		t.Fatal("local inbound port conflict accepted")
 	}
 	unchanged, err := s.GetAllSetting()
-	if err != nil || unchanged.UpstreamEnabled {
+	if err != nil || unchanged.LocalProxyEnable {
 		t.Fatal("invalid settings partially saved")
 	}
 	if err := database.GetDB().Delete(&in).Error; err != nil {
@@ -49,20 +57,19 @@ func TestUpstreamSettingsPersistTemplateAndRejectInboundPortConflict(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !loaded.LocalProxyEnable || !loaded.UpstreamEnabled || loaded.UpstreamConfig != settings.UpstreamConfig {
+	if !loaded.LocalProxyEnable || loaded.XrayTemplateConfig != manualProxyTemplate {
 		t.Fatal("upstream settings did not persist")
 	}
-	if !strings.Contains(loaded.XrayTemplateConfig, xray.LocalHTTPTag) {
-		t.Fatal("generated local proxy missing")
+	if strings.Contains(loaded.XrayTemplateConfig, xray.LocalHTTPTag) {
+		t.Fatal("saved template was modified")
 	}
 	loaded.LocalProxyEnable = false
-	loaded.UpstreamEnabled = false
 	if err := s.UpdateAllSetting(loaded); err != nil {
 		t.Fatal(err)
 	}
 	loaded, _ = s.GetAllSetting()
-	if strings.Contains(loaded.XrayTemplateConfig, xray.UpstreamTag) {
-		t.Fatal("upstream not removed")
+	if loaded.XrayTemplateConfig != manualProxyTemplate {
+		t.Fatal("manual upstream changed on disable")
 	}
 }
 
@@ -81,9 +88,8 @@ func TestManagerLocalProxyNeverStartsSharedAccountInbounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings.UpstreamEnabled = true
 	settings.LocalProxyEnable = true
-	settings.UpstreamConfig = `{"protocol":"trojan","address":"a.example","port":443,"password":"secret"}`
+	settings.XrayTemplateConfig = manualProxyTemplate
 	if err := s.UpdateAllSetting(settings); err != nil {
 		t.Fatal(err)
 	}

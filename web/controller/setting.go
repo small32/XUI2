@@ -9,7 +9,6 @@ import (
 	"xui/web/entity"
 	"xui/web/service"
 	"xui/web/session"
-	"xui/xray"
 )
 
 type updateUserForm struct {
@@ -39,24 +38,6 @@ func (a *SettingController) initRouter(g *gin.RouterGroup) {
 	g.POST("/updateUser", a.updateUser)
 	g.POST("/restartPanel", a.restartPanel)
 	g.POST("/connectionInfo", a.connectionInfo)
-	g.POST("/upstreamPreview", a.upstreamPreview)
-	g.POST("/upstreamStatus", a.upstreamStatus)
-}
-
-func (a *SettingController) upstreamStatus(c *gin.Context) {
-	var xs service.XrayService
-	running, local := xs.UpstreamStatus()
-	jsonObj(c, gin.H{"running": running, "localProxy": local}, nil)
-}
-
-func (a *SettingController) upstreamPreview(c *gin.Context) {
-	var settings entity.AllSetting
-	if err := c.ShouldBind(&settings); err != nil {
-		jsonObj(c, nil, err)
-		return
-	}
-	generated, err := xray.BuildUpstreamTemplate(settings.XrayTemplateConfig, settings.UpstreamConfig, settings.UpstreamEnabled, settings.LocalProxyEnable)
-	jsonObj(c, generated, err)
 }
 
 func (a *SettingController) getAllSetting(c *gin.Context) {

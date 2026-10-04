@@ -83,36 +83,9 @@
                         </a-tab-pane>{{end}}
                         <a-tab-pane key="3" tab="xray 相关设置">
                             <a-form layout="vertical" style="background:white;padding:20px">
-                                <a-form-item label="上级服务器配置">
-                                    <a-switch v-model="allSetting.upstreamEnabled" @change="upstreamEnabledChanged"></a-switch>
-                                    <span style="margin-left:10px">启用上级服务器，保存并重启面板生效</span>
-                                </a-form-item>
-                                <a-alert v-if="allSetting.upstreamEnabled" :type="upstreamStatus.running ? 'success' : 'info'" :message="upstreamStatus.running ? (upstreamStatus.localProxy ? '上级配置已加载，本机代理监听已启动' : '上级配置已加载') : '上级配置尚未运行，请保存后重启面板并检查日志'" style="margin-bottom:16px"></a-alert>
-                                <div v-if="allSetting.upstreamEnabled">
-                                    <a-form-item label="协议">
-                                        <a-select v-model="upstream.protocol" style="max-width:300px" @change="upstreamProtocolChanged">
-                                            <a-select-option value="trojan">Trojan</a-select-option>
-                                            <a-select-option value="vmess">VMess</a-select-option>
-                                            <a-select-option value="vless">VLESS</a-select-option>
-                                            <a-select-option value="dokodemo-door">dokodemo-door（固定目标转发）</a-select-option>
-                                        </a-select>
-                                    </a-form-item>
-                                    <a-form-item label="上级服务器地址"><a-input v-model.trim="upstream.address" placeholder="域名或 IP，不含协议和端口" style="max-width:500px"></a-input></a-form-item>
-                                    <a-form-item label="端口"><a-input-number v-model="upstream.port" :min="1" :max="65535"></a-input-number></a-form-item>
-                                    <a-form-item v-if="upstream.protocol==='trojan'" label="密码"><a-input-password v-model="upstream.password" style="max-width:500px"></a-input-password></a-form-item>
-                                    <a-form-item v-if="['vmess','vless'].includes(upstream.protocol)" label="UUID"><a-input v-model.trim="upstream.id" style="max-width:500px"></a-input></a-form-item>
-                                    <a-form-item v-if="upstream.protocol==='vmess'" label="alterId"><a-input-number v-model="upstream.alterId" :min="0"></a-input-number></a-form-item>
-                                    <a-form-item v-if="upstream.protocol==='vless'" label="加密（encryption）"><a-input v-model.trim="upstream.encryption" placeholder="none" style="max-width:500px"></a-input></a-form-item>
-                                    <a-form-item v-if="upstream.protocol==='vless'" label="Flow"><a-input v-model.trim="upstream.flow" placeholder="留空或填写上级要求的 flow" style="max-width:500px"></a-input></a-form-item>
-                                    <a-form-item label="传输配置（streamSettings JSON）" help="Trojan 通常使用 TCP + TLS；VMess/VLESS 请按上级填写 TLS、WebSocket、gRPC 或 REALITY 配置。">
-                                        <a-textarea v-model="upstreamStream" :rows="7" style="font-family:monospace"></a-textarea>
-                                    </a-form-item>
-                                    <a-alert v-if="upstream.protocol==='dokodemo-door'" type="info" show-icon message="此模式只把本机 127.0.0.1:10810 的 TCP/UDP 转发到固定目标，不能作为通用外网代理。"></a-alert>
-                                    <a-button style="margin-top:12px" @click="previewUpstream">生成配置模版</a-button>
-                                </div>
                                 <a-form-item label="允许本机使用上级服务器代理" style="margin-top:20px">
-                                    <a-switch v-model="allSetting.localProxyEnable" :disabled="!allSetting.upstreamEnabled || upstream.protocol==='dokodemo-door'"></a-switch>
-                                    <p>保存并重启面板后，本机 HTTP 代理为 127.0.0.1:10809，SOCKS5 为 127.0.0.1:10808。菜单下载、apt 和证书续期自动使用，新登录终端也会加载代理。</p>
+                                    <a-switch v-model="allSetting.localProxyEnable"></a-switch>
+                                    <p>上级出站和路由直接在下方 Xray 配置模版中填写。保存并重启面板后，本机 HTTP 代理为 127.0.0.1:10809，SOCKS5 为 127.0.0.1:10808。菜单下载、apt 和证书续期自动使用，新登录终端也会加载代理。</p>
                                     <p>现有终端可运行 <code>source /etc/profile.d/xui-proxy.sh</code>。关闭后重启面板，并重新登录终端以清除已有代理环境。</p>
                                 </a-form-item>
                             </a-form>
@@ -149,11 +122,6 @@
             connInfo: null,
             showToken: false,
             refreshingFingerprint: false,
-            upstream: {protocol:'trojan',address:'',port:443,password:'',id:'',alterId:0,encryption:'none',flow:''},
-            upstreamStream: '{"network":"tcp","security":"tls","tlsSettings":{"allowInsecure":false}}',
-            upstreamDirty: false,
-            loadingUpstream: false,
-            upstreamStatus: {running:false,localProxy:false},
         },
         methods: {
             loading(spinning = true) {
@@ -166,16 +134,6 @@
                 if (msg.success) {
                     this.oldAllSetting = new AllSetting(msg.obj);
                     this.allSetting = new AllSetting(msg.obj);
-                    this.loadingUpstream = true;
-                    const defaults = {protocol:'trojan',address:'',port:443,password:'',id:'',alterId:0,encryption:'none',flow:''};
-                    try {
-                        const stored = JSON.parse(this.allSetting.upstreamConfig || '{}');
-                        this.upstream = Object.assign(defaults, stored);
-                        this.upstreamStream = JSON.stringify(stored.streamSettings || {network:'tcp',security:'tls',tlsSettings:{allowInsecure:false}}, null, 2);
-                    } catch (e) { this.$message.error('上级配置读取失败，请重新填写'); this.upstream = defaults; }
-                    await this.$nextTick();
-                    this.upstreamDirty = false;
-                    this.loadingUpstream = false;
                     this.saveBtnDisable = true;
                 }
             },
@@ -200,35 +158,12 @@
                 }
             },
             async updateAllSetting() {
-                if (!this.serializeUpstream()) return;
                 this.loading(true);
                 const msg = await HttpUtil.post("/xui/setting/update", this.allSetting);
                 this.loading(false);
                 if (msg.success) {
                     await this.getAllSetting();
                 }
-            },
-            serializeUpstream() {
-                if (!this.allSetting.upstreamEnabled) return true;
-                try {
-                    const stream = JSON.parse(this.upstreamStream);
-                    if (!stream || Array.isArray(stream) || typeof stream !== 'object') throw new Error('传输配置必须是 JSON 对象');
-                    this.allSetting.upstreamConfig = JSON.stringify(Object.assign({}, this.upstream, {streamSettings:stream}));
-                    return true;
-                } catch (e) { this.$message.error('传输配置 JSON 无效：' + e.message); return false; }
-            },
-            upstreamEnabledChanged(enabled) { if (!enabled) this.allSetting.localProxyEnable = false; },
-            upstreamProtocolChanged(protocol) {
-                if (protocol === 'dokodemo-door') this.allSetting.localProxyEnable = false;
-            },
-            async previewUpstream() {
-                if (!this.serializeUpstream()) return;
-                const msg = await HttpUtil.post('/xui/setting/upstreamPreview', this.allSetting);
-                if (msg.success) { this.allSetting.xrayTemplateConfig = msg.obj; this.$message.success('已生成配置模版，请保存并重启面板'); }
-            },
-            async loadUpstreamStatus() {
-                const msg = await HttpUtil.post('/xui/setting/upstreamStatus');
-                if (msg.success) this.upstreamStatus = msg.obj;
             },
             async updateUser() {
                 this.loading(true);
@@ -258,17 +193,12 @@
                 }
             }
         },
-        watch: {
-            upstream: {deep:true, handler() { if (!this.loadingUpstream) this.upstreamDirty = true; }},
-            upstreamStream() { if (!this.loadingUpstream) this.upstreamDirty = true; },
-        },
         async mounted() {
             await this.getAllSetting();
             await this.loadConnInfo();
-            await this.loadUpstreamStatus();
             while (true) {
                 await PromiseUtil.sleep(1000);
-                this.saveBtnDisable = this.oldAllSetting.equals(this.allSetting) && !this.upstreamDirty;
+                this.saveBtnDisable = this.oldAllSetting.equals(this.allSetting);
             }
         },
     });
