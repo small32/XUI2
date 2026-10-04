@@ -527,12 +527,11 @@ ssl_cert_issue() {
             LOGE "证书安装失败,脚本退出"
             exit 1
         else
-            LOGI "证书安装成功,开启自动更新..."
+            LOGI "证书安装成功,设置自动续期..."
         fi
-        if ! "$acme_sh" --upgrade --auto-upgrade 2>/dev/null; then
-            LOGE "自动更新(acme.sh --upgrade)设置失败,脚本退出"
-            chmod 755 "$certPath"
-            exit 1
+        # 客户端升级需要下载 GitHub 归档，失败不应阻断已签发证书的续期调度。
+        if ! "$acme_sh" --upgrade --auto-upgrade; then
+            LOGI "acme.sh 客户端升级失败，保留现有版本并继续配置证书自动续期"
         fi
         # 取消 acme.sh 自带的定时任务：续期改由下面的 systemd timer 调度，
         # 不再让 acme.sh 往 root 的 crontab 里写任务。
@@ -579,10 +578,10 @@ TIMER_EOF
         systemctl daemon-reload
         if systemctl enable --now xui-ssl.timer 2>/dev/null; then
             LOGI "已启用续期定时器 xui-ssl.timer(每天检查,剩余不足7天自动重签并重启面板)"
+            LOGI "证书已安装并已开启自动续期"
         else
             LOGE "续期定时器启用失败(证书已签发,可稍后手动执行 systemctl enable --now xui-ssl.timer)"
         fi
-        LOGI "证书已安装并已开启自动续期"
         ls -lah "$certPath"
         chmod 755 "$certPath"
     else
