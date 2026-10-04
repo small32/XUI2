@@ -44,6 +44,8 @@ func NewServerManagementController(g *gin.RouterGroup) *ServerManagementControll
 	g.POST("/traffic-summary/snapshots", a.resetSnapshots)
 	g.POST("/traffic-summary/nodes/:port", a.nodeUsage)
 	g.POST("/server/inbound/:port", a.remoteInbounds)
+	g.POST("/server/inbounds/all", a.allNodeInbounds)
+	g.POST("/server/inbounds/copy", a.copyNodeInbounds)
 	cron := global.GetWebServer().GetCron()
 	cron.AddFunc(monthlyResetCronSpec, a.monthlyReset)
 	cron.AddFunc(monthlyResetFallbackSpec, a.monthlyReset)
@@ -221,5 +223,20 @@ func (a *ServerManagementController) remoteInbounds(c *gin.Context) {
 		return
 	}
 	v, err := a.service.RemoteInbounds(port)
+	jsonObj(c, v, err)
+}
+
+func (a *ServerManagementController) allNodeInbounds(c *gin.Context) {
+	v, err := a.service.AllNodeInbounds()
+	jsonObj(c, v, err)
+}
+
+func (a *ServerManagementController) copyNodeInbounds(c *gin.Context) {
+	var request service.NodeInboundCopyRequest
+	if err := c.ShouldBind(&request); err != nil {
+		jsonMsg(c, "同步入站", err)
+		return
+	}
+	v, err := a.service.CopyNodeInbounds(request)
 	jsonObj(c, v, err)
 }

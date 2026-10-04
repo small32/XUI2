@@ -28,12 +28,18 @@ bash <(curl -fLsS https://raw.githubusercontent.com/small32/XUI2/main/install.sh
 
 ## 被控端 API
 
+管理端的“入站列表”页面提供“被控端入站设置”，按被控端名称分标签读取全部入站（包括本地创建的入站）。可以全选或勾选部分入站，再选择一个或多个其他被控端同步。每个目标、端口单独显示成功或失败，失败项可重新选择后再同步。管理端和被控端都需要更新到支持此功能的代码版本。
+
+此操作将配置复制为目标端的本地入站，不复制来源的已用流量或管理账号 ID。目标同端口默认跳过；勾选覆盖时仅覆盖本地入站，并保留目标已有流量。受管入站仍通过管理端原有账号同步机制配置。文件证书路径取自目标端面板设置，保存后立即请求重载 Xray。
+
 API 位于被控端 HTTPS 面板的 `/api/v1`，使用独立的 `Authorization: Bearer <API令牌>`。明文 HTTP、缺失令牌和错误令牌均被拒绝。自签名证书由管理端按 SHA256 指纹校验。API 仅供管理端后端调用；浏览器不保存被控端令牌。
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
 | GET | `/capabilities` | 检查 API 版本 |
 | GET | `/inbounds` | 查询全部受管账号 |
+| GET | `/inbounds/all` | 查询全部入站，包含本地入站 |
+| PUT | `/inbounds/copy/{port}` | 复制配置为本地入站，支持覆盖本地同端口配置 |
 | GET | `/inbounds/{port}` | 查询指定端口账号 |
 | PUT | `/inbounds/{port}` | 按管理端账号 ID 新增或修改 |
 | DELETE | `/inbounds/{port}` | 删除指定账号 |
@@ -68,4 +74,4 @@ go build ./...
 bash -n install.sh
 ```
 
-Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.1.8`；提交到 `main` 不会自动发布 Release。
+Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.1.9`；提交到 `main` 不会自动发布 Release。

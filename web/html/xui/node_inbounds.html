@@ -1,0 +1,72 @@
+{{define "nodeInboundBrowser"}}
+<script type="text/x-template" id="node-inbound-browser">
+<a-card title="被控端入站设置" style="margin-top:20px">
+    <a-button :loading="loading" @click="load">读取所有被控端入站</a-button>
+    <a-alert style="margin-top:12px" type="info" show-icon message="同步复制配置及账号凭据，不复制已用流量。目标同端口默认跳过；覆盖仅适用于本地入站，受管入站请通过管理端统一配置。被控端需更新到支持此功能的版本。"></a-alert>
+    <a-empty v-if="!loading && !nodes.length" description="尚未添加被控端"></a-empty>
+    <a-tabs v-model="activeNode" @change="clearSelection">
+        <a-tab-pane v-for="node in nodes" :key="node.nodeId" :tab="node.name">
+            <a-alert v-if="node.error" type="error" show-icon :message="node.error"></a-alert>
+            <template v-else>
+                <a-button @click="selectAll(node)">全选</a-button>
+                <a-button style="margin-left:8px" @click="selectedPorts=[]">清空选择</a-button>
+                <span style="margin-left:12px">已选 [[selectedPorts.length]] / [[(node.inbounds||[]).length]] 项</span>
+                <a-table :data-source="node.inbounds||[]" row-key="port" :pagination="{pageSize:10}" :row-selection="{selectedRowKeys:selectedPorts,onChange:selectPorts}" size="small" :scroll="{x:800}" style="margin-top:12px">
+                    <a-table-column title="用户名" data-index="remark"></a-table-column>
+                    <a-table-column title="端口" data-index="port"></a-table-column>
+                    <a-table-column title="协议" data-index="protocol"></a-table-column>
+                    <a-table-column title="监听地址" data-index="listen"></a-table-column>
+                    <a-table-column title="状态"><template slot-scope="text,row">[[row.enable?'启用':'停用']]</template></a-table-column>
+                    <a-table-column title="来源"><template slot-scope="text,row">[[row.managerAccountId>0?'受管':'本地']]</template></a-table-column>
+                    <a-table-column title="配置"><template slot-scope="text,row"><a-button type="link" @click="view(row)">查看</a-button></template></a-table-column>
+                </a-table>
+                <a-form layout="vertical" style="margin-top:16px">
+                    <a-form-item label="同步到其他被控端">
+                        <a-select mode="multiple" v-model="targetIds" placeholder="选择一个或多个目标" style="width:100%">
+                            <a-select-option v-for="target in nodes.filter(n=>n.nodeId!==node.nodeId)" :key="target.nodeId" :value="target.nodeId">[[target.name]]</a-select-option>
+                        </a-select>
+                    </a-form-item>
+                    <a-checkbox v-model="overwrite">覆盖目标端同端口的本地入站（保留目标已用流量）</a-checkbox>
+                    <a-popconfirm title="将把所选入站配置复制到目标被控端，确定同步吗？" @confirm="copy">
+                        <a-button type="primary" style="margin-left:12px" :loading="copying" :disabled="loading||!selectedPorts.length||!targetIds.length">同步所选入站</a-button>
+                    </a-popconfirm>
+                </a-form>
+            </template>
+        </a-tab-pane>
+    </a-tabs>
+    <a-table v-if="results.length" :data-source="results" :row-key="r=>r.nodeId+':'+r.port" :pagination="{pageSize:10}" size="small">
+        <a-table-column title="目标" data-index="name"></a-table-column>
+        <a-table-column title="端口" data-index="port"></a-table-column>
+        <a-table-column title="结果"><template slot-scope="text,row"><a-tag :color="row.success?'green':'red'">[[row.success?'已同步':'未同步']]</a-tag>[[row.error]]</template></a-table-column>
+    </a-table>
+    <a-modal v-model="detailsVisible" title="入站完整配置" :footer="null" width="800px"><pre style="white-space:pre-wrap;word-break:break-all">[[details]]</pre></a-modal>
+</a-card>
+</script>
+<script>
+Vue.component('node-inbound-browser',{
+    template:'#node-inbound-browser',delimiters:['[[',']]'],
+    data(){return {loading:false,copying:false,nodes:[],activeNode:null,selectedPorts:[],targetIds:[],overwrite:false,results:[],detailsVisible:false,details:''};},
+    methods:{
+        async load(){
+            this.loading=true;
+            try {
+                const m=await HttpUtil.post('/xui/server/inbounds/all');
+                if(m.success){this.nodes=m.obj||[];if(!this.nodes.some(n=>n.nodeId===this.activeNode))this.activeNode=this.nodes.length?this.nodes[0].nodeId:null;this.clearSelection();}
+            } finally {this.loading=false;}
+        },
+        clearSelection(){this.selectedPorts=[];this.targetIds=[];},
+        selectPorts(keys){this.selectedPorts=keys;},
+        selectAll(node){this.selectedPorts=(node.inbounds||[]).map(row=>row.port);},
+        view(row){const detail={...row};for(const key of ['settings','streamSettings','sniffing']){try{detail[key]=JSON.parse(detail[key]);}catch(e){}}this.details=JSON.stringify(detail,null,2);this.detailsVisible=true;},
+        async copy(){
+            if(this.copying||!this.selectedPorts.length||!this.targetIds.length)return;
+            this.copying=true;this.results=[];
+            try {
+                const m=await HttpUtil.post('/xui/server/inbounds/copy',{sourceNodeId:this.activeNode,targetNodeIds:this.targetIds,ports:this.selectedPorts,overwrite:this.overwrite});
+                if(m.success){this.results=m.obj||[];const success=this.results.filter(r=>r.success).length;this.$message.info('已同步 '+success+' 项，未同步 '+(this.results.length-success)+' 项');await this.load();}
+            } finally {this.copying=false;}
+        }
+    },mounted(){this.load();}
+});
+</script>
+{{end}}

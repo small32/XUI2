@@ -49,10 +49,12 @@ func RegisterAgentAPI(engine *gin.Engine) {
 		c.Next()
 	})
 	g.GET("/capabilities", func(c *gin.Context) {
-		c.JSON(200, gin.H{"apiVersion": 1, "features": []string{"inbounds.read", "inbounds.upsert", "inbounds.delete", "traffic.read", "traffic.reset", "inbounds.disable"}})
+		c.JSON(200, gin.H{"apiVersion": 1, "features": []string{"inbounds.read", "inbounds.read.all", "inbounds.copy", "inbounds.upsert", "inbounds.delete", "traffic.read", "traffic.reset", "inbounds.disable"}})
 	})
 	g.GET("/inbounds/:port", a.getInbound)
 	g.GET("/inbounds", a.listInbounds)
+	g.GET("/inbounds/all", a.listAllInbounds)
+	g.PUT("/inbounds/copy/:port", a.copyInbound)
 	g.GET("/traffic", a.traffic)
 	g.PUT("/inbounds/:port", a.upsert)
 	g.DELETE("/inbounds/:port", a.remove)
