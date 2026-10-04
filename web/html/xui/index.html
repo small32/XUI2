@@ -11,6 +11,21 @@
     .ant-col-sm-24 {
         margin-top: 10px;
     }
+
+    .status-cards > .ant-col {
+        display: flex;
+    }
+
+    .status-cards .ant-card {
+        width: 100%;
+    }
+
+    .status-cards .ant-card-body {
+        min-height: 70px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+    }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -65,7 +80,7 @@
                 </a-row>
             </transition>
             <transition name="list" appear>
-                <a-row>
+                <a-row type="flex" class="status-cards" :gutter="12">
                     {{if eq .role "agent"}}<a-col :sm="24" :md="12">
                         <a-card hoverable>
                             xray 状态:
