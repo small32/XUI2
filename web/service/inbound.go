@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 	"xui/database"
@@ -59,7 +60,7 @@ var reservedRemarks = map[string]bool{
 
 // CheckInboundRemark 校验入站用户名（remark）是否可用：不得与面板管理员账号重名，
 // 也不得使用 root / admin 这类保留名（不区分大小写）。
-// 登录流程先校验管理员、失败后再按 remark 匹配入站完成受限登录，
+// 备注保留现有命名校验；受限登录使用端口号匹配入站，
 // 重名会让受限账号顶着管理员用户名登录，因此禁止使用。
 func (s *InboundService) CheckInboundRemark(remark string) error {
 	remark = strings.TrimSpace(remark)
@@ -149,14 +150,14 @@ func (s *InboundService) GetInboundByPort(port int) (*model.Inbound, error) {
 	return inbound, nil
 }
 
-// CheckInboundCredential 校验受限登录凭据：账号=入站"备注"（即入站用户名），密码=入站密码。
-// 仅支持 trojan / shadowsocks / socks / http 四种带密码的协议，其余返回 nil。
+// CheckInboundCredential 校验受限登录凭据：账号=入站端口号，密码=入站密码或统一密码。
 func (s *InboundService) CheckInboundCredential(username, password string) *model.Inbound {
-	if username == "" || password == "" {
+	port, err := strconv.Atoi(username)
+	if err != nil || port < 1 || port > 65535 || password == "" {
 		return nil
 	}
 	var inbound model.Inbound
-	if err := database.GetDB().Where("remark = ?", username).First(&inbound).Error; err != nil || inbound.Id == 0 {
+	if err := database.GetDB().Where("port = ?", port).First(&inbound).Error; err != nil || inbound.Id == 0 {
 		return nil
 	}
 	expected := inboundPassword(&inbound)
