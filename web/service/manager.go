@@ -62,6 +62,11 @@ type NodeInput struct {
 }
 
 type agentTraffic struct {
+	LocalID         int    `json:"localId"`
+	Username        string `json:"username"`
+	Total           int64  `json:"total"`
+	ExpiryTime      int64  `json:"expiryTime"`
+	MonthlyReset    bool   `json:"monthlyReset"`
 	AccountID       int    `json:"accountId"`
 	Port            int    `json:"port"`
 	Up              int64  `json:"up"`
@@ -80,10 +85,16 @@ func (s *ServerManagementService) reconcileNode(nodeID int, observed []agentTraf
 	}
 	byID := make(map[int]model.Inbound, len(desired))
 	for _, in := range desired {
+		if !in.TargetsNode(nodeID) {
+			continue
+		}
 		byID[in.Id] = in
 	}
 	seen := make(map[int]agentTraffic, len(observed))
 	for _, row := range observed {
+		if row.AccountID <= 0 {
+			continue
+		}
 		seen[row.AccountID] = row
 	}
 	queueIfMissing := func(in *model.Inbound, kind string) error {
@@ -97,14 +108,20 @@ func (s *ServerManagementService) reconcileNode(nodeID int, observed []agentTraf
 		return enqueue(database.GetDB(), nodeID, in, kind, "")
 	}
 	for _, in := range desired {
+		if !in.TargetsNode(nodeID) {
+			continue
+		}
 		actual, exists := seen[in.Id]
-		if !exists || actual.Port != in.Port || actual.ManagerRevision != inboundRevision(&in) {
+		if !exists || actual.Port != in.Port || actual.ManagerRevision != nodeInboundRevision(&in, nodeID) {
 			if err := queueIfMissing(&in, "upsert"); err != nil {
 				return err
 			}
 		}
 	}
 	for _, actual := range observed {
+		if actual.AccountID <= 0 {
+			continue
+		}
 		if _, exists := byID[actual.AccountID]; !exists {
 			stale := model.Inbound{Id: actual.AccountID, Port: actual.Port}
 			if err := queueIfMissing(&stale, "delete"); err != nil {
@@ -453,6 +470,9 @@ func (s *ServerManagementService) callContext(ctx context.Context, node *model.M
 }
 
 func enqueue(tx *gorm.DB, nodeID int, inbound *model.Inbound, kind, operation string) error {
+	if kind != "delete" && !inbound.TargetsNode(nodeID) {
+		return nil
+	}
 	if operation == "" {
 		operation = operationID()
 	}
@@ -460,14 +480,19 @@ func enqueue(tx *gorm.DB, nodeID int, inbound *model.Inbound, kind, operation st
 	var err error
 	switch kind {
 	case "upsert", "enable":
-		copy := *inbound
+		desired, err := InboundForNode(inbound, nodeID)
+		if err != nil {
+			return err
+		}
+		copy := *desired
 		copy.ManagerAccountID = inbound.Id
-		copy.ManagerRevision = inboundRevision(inbound)
+		copy.ManagerRevision = inboundRevision(&copy)
+		copy.NodeConfigs, copy.TargetNodes, copy.SharedPassword = "", "", ""
 		payload, err = json.Marshal(copy)
 	case "delete":
 		payload, err = json.Marshal(map[string]interface{}{"accountId": inbound.Id})
 	case "disable":
-		payload, err = json.Marshal(map[string]interface{}{"accountId": inbound.Id, "reason": inbound.DisabledBy, "managerRevision": inboundRevision(inbound)})
+		payload, err = json.Marshal(map[string]interface{}{"accountId": inbound.Id, "reason": inbound.DisabledBy, "managerRevision": nodeInboundRevision(inbound, nodeID)})
 	case "reset":
 		period := 0
 		if strings.HasPrefix(operation, "reset-") {
@@ -528,6 +553,21 @@ func (s *ServerManagementService) queueInbound(inbound *model.Inbound, oldPort i
 				}
 			}
 			for _, node := range nodes {
+				if kind != "delete" && !inbound.TargetsNode(node.Id) {
+					if err := tx.Model(&model.SyncTask{}).Where("node_id = ? AND account_id = ? AND status = ? AND kind IN ?", node.Id, inbound.Id, "pending", []string{"upsert", "enable", "disable"}).Updates(map[string]interface{}{"status": "abandoned", "error": "被控端已取消下发"}).Error; err != nil {
+						return err
+					}
+					var present int64
+					if err := tx.Model(&model.NodeTraffic{}).Where("node_id = ? AND account_id = ?", node.Id, inbound.Id).Count(&present).Error; err != nil {
+						return err
+					}
+					if present > 0 {
+						if err := enqueue(tx, node.Id, inbound, "delete", ""); err != nil {
+							return err
+						}
+					}
+					continue
+				}
 				// The agent finds an existing row by manager_account_id. Its
 				// update changes the port in place and preserves traffic counters.
 				if err := enqueue(tx, node.Id, inbound, kind, ""); err != nil {
@@ -582,6 +622,24 @@ func (s *ServerManagementService) DispatchPending() error {
 			break
 		}
 		key := accountKey{task.NodeID, task.AccountID}
+		if task.Kind == "delete" {
+			var current model.Inbound
+			if err := database.GetDB().First(&current, task.AccountID).Error; err == nil && current.TargetsNode(task.NodeID) {
+				if err := database.GetDB().Model(&task).Updates(map[string]interface{}{"status": "abandoned", "error": "被控端已重新选为下发目标"}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+		}
+		if task.Kind == "upsert" || task.Kind == "enable" || task.Kind == "disable" {
+			var current model.Inbound
+			if err := database.GetDB().First(&current, task.AccountID).Error; err == nil && !current.TargetsNode(task.NodeID) {
+				if err := database.GetDB().Model(&task).Updates(map[string]interface{}{"status": "abandoned", "error": "被控端已取消下发"}).Error; err != nil {
+					return err
+				}
+				continue
+			}
+		}
 		if blocked[key] {
 			continue
 		}
@@ -606,10 +664,15 @@ func (s *ServerManagementService) DispatchPending() error {
 			if err != nil {
 				return err
 			}
-			copy := desired
+			resolved, resolveErr := InboundForNode(&desired, node.Id)
+			if resolveErr != nil {
+				return resolveErr
+			}
+			copy := *resolved
 			copy.Enable, copy.DisabledBy = true, ""
 			copy.ManagerAccountID = desired.Id
 			copy.ManagerRevision = inboundRevision(&copy)
+			copy.NodeConfigs, copy.TargetNodes, copy.SharedPassword = "", "", ""
 			payload, err := json.Marshal(copy)
 			if err != nil {
 				return err
@@ -643,11 +706,15 @@ func (s *ServerManagementService) DispatchPending() error {
 				// A node may have been disabled before this account was first
 				// synchronized. Create the current account, then reset it.
 				var desired model.Inbound
-				if err = database.GetDB().First(&desired, task.AccountID).Error; err == nil {
+				lookupErr := database.GetDB().First(&desired, task.AccountID).Error
+				if lookupErr != nil {
+					err = lookupErr
+				}
+				if lookupErr == nil && desired.TargetsNode(node.Id) {
 					copy := desired
 					copy.ManagerAccountID = desired.Id
 					copy.ManagerRevision = inboundRevision(&desired)
-					err = s.callContext(ctx, &node, http.MethodPut, "/inbounds/"+strconv.Itoa(desired.Port), &copy, task.OperationID, nil)
+					err = s.sendNodeInbound(ctx, &node, &copy, task.OperationID, nil)
 					if err == nil {
 						path = "/inbounds/" + strconv.Itoa(desired.Port) + "/traffic/reset"
 						if desired.Port != task.Port {
@@ -671,11 +738,13 @@ func (s *ServerManagementService) DispatchPending() error {
 					err = nil // The account was deleted locally as well.
 				} else if lookupErr != nil {
 					err = lookupErr
+				} else if !desired.TargetsNode(node.Id) {
+					err = nil
 				} else {
 					copy := desired
 					copy.ManagerAccountID = desired.Id
 					copy.ManagerRevision = inboundRevision(&desired)
-					err = s.callContext(ctx, &node, http.MethodPut, "/inbounds/"+strconv.Itoa(desired.Port), &copy, task.OperationID, &result)
+					err = s.sendNodeInbound(ctx, &node, &copy, task.OperationID, &result)
 				}
 			}
 		}

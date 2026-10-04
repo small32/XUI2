@@ -38,6 +38,9 @@ class DBInbound {
         this.expiryTime = 0;
         // 按月计算：勾选后每月 1 日清零重新计流量；不勾选则累计使用、流量用完即止。
         this.monthlyReset = false;
+        this.targetNodes = '';
+        this.nodeConfigs = '';
+        this.sharedPassword = '';
 
         this.remoteAddress = "";
         this.listen = "";
@@ -165,11 +168,14 @@ class DBInbound {
     }
 
     hasLink() {
+        if(this.nodeConfigs){const configs=JSON.parse(this.nodeConfigs);if(Object.values(configs).some(c=>[Protocols.VMESS,Protocols.VLESS,Protocols.TROJAN,Protocols.SHADOWSOCKS,Protocols.SOCKS,Protocols.HTTP].includes(c.protocol)))return true;}
         switch (this.protocol) {
             case Protocols.VMESS:
             case Protocols.VLESS:
             case Protocols.TROJAN:
             case Protocols.SHADOWSOCKS:
+            case Protocols.SOCKS:
+            case Protocols.HTTP:
                 return true;
             default:
                 return false;

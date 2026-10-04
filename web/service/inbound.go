@@ -182,6 +182,9 @@ func (s *InboundService) GetInboundPassword(id int) (string, bool) {
 
 // inboundPassword 按协议从入站 settings 中取"密码"，口径与面板详细信息弹窗一致
 func inboundPassword(inbound *model.Inbound) string {
+	if inbound.SharedPassword != "" {
+		return inbound.SharedPassword
+	}
 	var settings map[string]interface{}
 	if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
 		return ""
@@ -243,6 +246,8 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
 		// Update only editable columns. AddTraffic increments up/down in SQL, so
 		// an edit racing with a traffic sample cannot write stale counters back.
 		updates := map[string]interface{}{
+			"target_nodes": inbound.TargetNodes,
+			"node_configs": inbound.NodeConfigs, "shared_password": inbound.SharedPassword,
 			"total": inbound.Total, "remark": inbound.Remark, "enable": inbound.Enable,
 			"disabled_by": disabledBy, "expiry_time": inbound.ExpiryTime,
 			"monthly_reset": inbound.MonthlyReset, "listen": inbound.Listen,

@@ -317,6 +317,9 @@
                     enable: dbInbound.enable,
                     expiryTime: dbInbound.expiryTime,
                     monthlyReset: dbInbound.monthlyReset,
+                    targetNodes: dbInbound.targetNodes,
+                    nodeConfigs: dbInbound.nodeConfigs,
+                    sharedPassword: dbInbound.sharedPassword,
 
                     listen: inbound.listen,
                     port: inbound.port,
@@ -336,6 +339,9 @@
                     enable: dbInbound.enable,
                     expiryTime: dbInbound.expiryTime,
                     monthlyReset: dbInbound.monthlyReset,
+                    targetNodes: dbInbound.targetNodes,
+                    nodeConfigs: dbInbound.nodeConfigs,
+                    sharedPassword: dbInbound.sharedPassword,
 
                     listen: inbound.listen,
                     port: inbound.port,
@@ -394,7 +400,7 @@
                     const remoteName = (remoteObj.remoteName || '').trim();
                     if (!remoteName) { this.$message.error('请在被控端管理中设置节点名称'); return null; }
                     const remoteLink = remoteInbound.genLink(remoteAddress, remoteName);
-                    if (remoteLink) links.push({ name: remoteName, content: remoteLink });
+                    if (remoteLink) links.push({ name: remoteName+' · '+remoteInbound.protocol, content: remoteLink });
                 }
                 if (!links.length) { this.$message.error('无法生成当前入站的节点链接'); return null; }
                 return links;

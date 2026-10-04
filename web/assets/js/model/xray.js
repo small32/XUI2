@@ -1086,6 +1086,13 @@ class Inbound extends XrayCommonClass {
             case Protocols.VLESS: return this.genVLESSLink(address, remark);
             case Protocols.SHADOWSOCKS: return this.genSSLink(address, remark);
             case Protocols.TROJAN: return this.genTrojanLink(address, remark);
+            case Protocols.SOCKS:
+            case Protocols.HTTP: {
+                const account=this.settings.accounts[0];
+                const scheme=this.protocol===Protocols.SOCKS?'socks':'http';
+                const params=new URLSearchParams({server:address,port:this.port,user:account.user,pass:account.pass,remark});
+                return 'tg://'+scheme+'?'+params.toString();
+            }
             default: return '';
         }
     }

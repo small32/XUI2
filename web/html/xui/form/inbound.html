@@ -66,6 +66,10 @@
     </a-form-item>
 </a-form>
 
+{{template "form/connection" $}}
+{{end}}
+
+{{define "form/connection"}}
 <!-- vmess settings -->
 <template v-if="inbound.protocol === Protocols.VMESS">
     {{template "form/vmess"}}

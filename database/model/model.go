@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"fmt"
 	"xui/util/json_util"
 	"xui/xray"
@@ -36,6 +37,10 @@ func IsPanelAdminUsername(username string) bool {
 }
 
 type Inbound struct {
+	NodeConfigs    string `json:"nodeConfigs" form:"nodeConfigs"`
+	SharedPassword string `json:"sharedPassword" form:"sharedPassword"`
+	// Empty targets preserves the legacy all-node assignment; [] selects none.
+	TargetNodes      string `json:"targetNodes" form:"targetNodes"`
 	Id               int    `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
 	ManagerAccountID int    `json:"managerAccountId" gorm:"column:manager_account_id;index"`
 	ManagerRevision  string `json:"managerRevision" gorm:"column:manager_revision"`
@@ -65,6 +70,22 @@ type Inbound struct {
 	Sniffing       string   `json:"sniffing" form:"sniffing"`
 }
 
+func (i *Inbound) TargetsNode(nodeID int) bool {
+	if i.TargetNodes == "" {
+		return true
+	}
+	var ids []int
+	if json.Unmarshal([]byte(i.TargetNodes), &ids) != nil {
+		return false
+	}
+	for _, id := range ids {
+		if id == nodeID {
+			return true
+		}
+	}
+	return false
+}
+
 // ManagedNode is known only to the manager. Tokens are never serialized in
 // browser responses; controller DTOs explicitly omit them.
 type ManagedNode struct {
@@ -90,6 +111,11 @@ type NodeTraffic struct {
 	DisabledBy      string
 	ManagerRevision string
 	ObservedAt      int64
+	// Negative AccountID identifies an agent-local inbound by its local ID.
+	Username     string
+	Total        int64
+	ExpiryTime   int64
+	MonthlyReset bool
 }
 
 // SyncTask is a durable outbox entry; dispatch can be retried safely.

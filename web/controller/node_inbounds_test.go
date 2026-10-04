@@ -61,6 +61,24 @@ func TestAgentAllInboundsIncludesLocalAndManaged(t *testing.T) {
 			t.Fatalf("missing local inbounds: %s", w.Body.String())
 		}
 	}
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/traffic", nil)
+	req.TLS = &tls.ConnectionState{}
+	req.Header.Set("Authorization", "Bearer "+token)
+	router.ServeHTTP(w, req)
+	var traffic struct {
+		Inbounds []struct {
+			AccountID int `json:"accountId"`
+			LocalID   int `json:"localId"`
+			Port      int `json:"port"`
+		} `json:"inbounds"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &traffic); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusOK || len(traffic.Inbounds) != 2 || traffic.Inbounds[0].AccountID != 0 || traffic.Inbounds[0].LocalID <= 0 || traffic.Inbounds[1].AccountID != 42 {
+		t.Fatalf("traffic omitted local inbound or changed managed identity: %s", w.Body.String())
+	}
 }
 
 func TestNodeInboundCopyFormBinding(t *testing.T) {

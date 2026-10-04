@@ -9,6 +9,7 @@
             <a-card title="流量汇总">
                 <div style="margin-bottom:16px">
                     <a-button type="primary" @click="load">刷新</a-button>
+					<a-button v-if="!restricted" style="margin-left:8px" :loading="collecting" @click="collectTraffic">读取最新被控端流量</a-button>
                     <a-checkbox-group v-if="!restricted" v-model="filters" style="margin-left:16px">
                         <a-checkbox value="enabled">已启用</a-checkbox>
                         <a-checkbox value="disabled">已停用</a-checkbox>
@@ -16,7 +17,8 @@
                         <a-checkbox value="unknown">未确认</a-checkbox>
                     </a-checkbox-group>
                 </div>
-                <a-table :data-source="visibleRows" :pagination="false" row-key="port">
+                <a-table :data-source="visibleRows" :pagination="false" :row-key="row=>row.localInboundId?'local:'+row.nodeId+':'+row.localInboundId:'managed:'+row.inboundId">
+                    <a-table-column title="来源"><template slot-scope="text,row">[[row.localInboundId?row.nodeName+'（本地入站）':'管理端受管账号']]</template></a-table-column>
                     <a-table-column title="用户名" data-index="username"></a-table-column>
                     <a-table-column title="端口" data-index="port"></a-table-column>
                     <a-table-column title="消耗流量" data-index="totalText"></a-table-column>
@@ -47,7 +49,8 @@
                     </a-table-column>
                     <a-table-column title="快照">
                         <template slot-scope="text,row">
-                            <a-button type="link" size="small" @click="openSnapshots(row)">查看</a-button>
+                            <a-button v-if="!row.localInboundId" type="link" size="small" @click="openSnapshots(row)">查看</a-button>
+                            <span v-else>-</span>
                         </template>
                     </a-table-column>
                     <a-table-column title="节点明细"><template slot-scope="text,row"><a-button type="link" size="small" @click="openNodes(row)">查看</a-button></template></a-table-column>
@@ -82,6 +85,7 @@
             siderDrawer,
             restricted: {{ .restricted }},
             rows: [],
+            collecting: false,
             // 三态筛选项，空数组表示不筛选、显示全部。仅管理员可见。
             filters: [],
             snapshotModal: {
@@ -109,6 +113,10 @@
                 this.nodesModal.title='节点流量 · 端口 '+row.port;
                 this.nodesModal.rows=[];
                 this.nodesModal.visible=true;
+                if(row.localInboundId){
+                    this.nodesModal.rows=[{nodeId:row.nodeId,name:row.nodeName,remotePort:row.port,up:row.up,down:row.down,usedText:row.totalText,observedAt:row.observedAt,enabled:row.enable,lastError:row.lastError}];
+                    return;
+                }
                 let m=await HttpUtil.post('/xui/traffic-summary/nodes/'+row.port);
                 if(m.success)this.nodesModal.rows=m.obj||[];else this.$message.error(m.msg);
             },
@@ -116,6 +124,11 @@
                 let m = await HttpUtil.post('/xui/traffic-summary/list');
                 if (m.success) this.rows = m.obj;
                 else this.$message.error(m.msg);
+            },
+            async collectTraffic() {
+                this.collecting=true;
+                try { await HttpUtil.post('/xui/server/traffic'); await this.load(); }
+                finally { this.collecting=false; }
             },
             // 留档由后端按 yyyymm 从最近往最前排好，页面不再排序。
             async openSnapshots(row) {

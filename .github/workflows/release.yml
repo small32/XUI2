@@ -50,6 +50,8 @@ jobs:
           go-version: '1.25'
       - name: Install musl toolchain
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Run tests
+        run: go test ./...
       - name: Build and package
         run: |
           set -euo pipefail
@@ -163,6 +165,9 @@ jobs:
             'XUI2 将面板分为管理端与被控端，安装时选择角色。' \
             '管理端通过 HTTPS Web API 向多台被控端同步账号，汇总流量并执行共享限额。' \
             '被控端保存本机月度流量快照；失败同步与 Xray 重载可重试。' \
+            '支持按账号选择下发节点，以及为不同被控端设置不同协议，账号公共信息与密码保持一致。' \
+            '被控端本地入站流量按端口计入共享额度，同端口配置以管理端下发配置为准。' \
+            '订阅与二维码使用各被控端的实际协议和连接配置。' \
             '安装包支持 Linux amd64 和 arm64，包含 Xray-core v26.3.27。' > notes.md
           gh release create "$VERSION" --target "$COMMIT" --title "XUI2 $VERSION" --notes-file notes.md --draft xui-linux-*.tar.gz SHA256SUMS
           gh release edit "$VERSION" --draft=false --prerelease=false --latest

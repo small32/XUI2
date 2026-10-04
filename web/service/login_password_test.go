@@ -29,7 +29,14 @@ func TestLoginPasswordSnapshot(t *testing.T) {
 			}
 		}
 	}
-	if _, err := WithLoginPassword(model.VLESS, `{}`, "old"); err == nil {
-		t.Fatal("changed protocol must fail closed")
+	for _, protocol := range []model.Protocol{model.VLESS, model.VMess} {
+		raw := `{"clients":[{"id":"node-uuid"}]}`
+		out, err := WithLoginPassword(protocol, raw, "shared-password")
+		if err != nil || out != raw {
+			t.Fatal("UUID protocol configuration must remain unchanged", err)
+		}
+	}
+	if _, err := WithLoginPassword(model.Dokodemo, `{}`, "old"); err == nil {
+		t.Fatal("unsupported subscription protocol must fail closed")
 	}
 }

@@ -167,6 +167,16 @@ func (a *InboundController) addInbound(c *gin.Context) {
 		jsonMsg(c, "添加", err)
 		return
 	}
+	if !local {
+		if err := service.ValidateInboundTargets(inbound); err != nil {
+			jsonMsg(c, "添加", err)
+			return
+		}
+		if err := service.ValidateNodeProtocols(inbound); err != nil {
+			jsonMsg(c, "添加", err)
+			return
+		}
+	}
 	user := session.GetLoginUser(c)
 	if user == nil {
 		pureJsonMsg(c, false, "请先登录管理员账号")
@@ -275,11 +285,24 @@ func (a *InboundController) updateInbound(c *gin.Context) {
 		jsonMsg(c, "修改", err)
 		return
 	}
+	if !local {
+		if err := service.ValidateInboundTargets(inbound); err != nil {
+			jsonMsg(c, "修改", err)
+			return
+		}
+		if err := service.ValidateNodeProtocols(inbound); err != nil {
+			jsonMsg(c, "修改", err)
+			return
+		}
+	}
 	inbound.Id = id
 	if local {
 		inbound.UserId = old.UserId
 		inbound.ManagerAccountID = old.ManagerAccountID
 		inbound.ManagerRevision = old.ManagerRevision
+		inbound.TargetNodes = old.TargetNodes
+		inbound.NodeConfigs = old.NodeConfigs
+		inbound.SharedPassword = old.SharedPassword
 	}
 	oldPort := old.Port
 	err = a.inboundService.UpdateInbound(inbound)

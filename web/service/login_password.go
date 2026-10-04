@@ -8,6 +8,9 @@ import (
 
 // WithLoginPassword only changes response data, never persisted credentials.
 func WithLoginPassword(protocol model.Protocol, raw, password string) (string, error) {
+	if protocol == model.VLESS || protocol == model.VMess {
+		return raw, nil
+	}
 	var settings map[string]interface{}
 	if err := json.Unmarshal([]byte(raw), &settings); err != nil || settings == nil {
 		return "", fmt.Errorf("入站配置无效")

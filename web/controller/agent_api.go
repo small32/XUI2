@@ -112,11 +112,16 @@ func (a *AgentAPI) traffic(c *gin.Context) {
 		return
 	}
 	var rows []model.Inbound
-	if err := database.GetDB().Where("manager_account_id > 0").Find(&rows).Error; err != nil {
+	if err := database.GetDB().Order("port").Find(&rows).Error; err != nil {
 		apiError(c, err)
 		return
 	}
 	type item struct {
+		LocalID         int    `json:"localId"`
+		Username        string `json:"username"`
+		Total           int64  `json:"total"`
+		ExpiryTime      int64  `json:"expiryTime"`
+		MonthlyReset    bool   `json:"monthlyReset"`
 		AccountID       int    `json:"accountId"`
 		Port            int    `json:"port"`
 		Up              int64  `json:"up"`
@@ -127,7 +132,7 @@ func (a *AgentAPI) traffic(c *gin.Context) {
 	}
 	out := make([]item, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, item{row.ManagerAccountID, row.Port, row.Up, row.Down, row.Enable, row.DisabledBy, row.ManagerRevision})
+		out = append(out, item{LocalID: row.Id, Username: row.Remark, Total: row.Total, ExpiryTime: row.ExpiryTime, MonthlyReset: row.MonthlyReset, AccountID: row.ManagerAccountID, Port: row.Port, Up: row.Up, Down: row.Down, Enabled: row.Enable, DisabledBy: row.DisabledBy, ManagerRevision: row.ManagerRevision})
 	}
 	c.JSON(200, gin.H{"observedAt": time.Now().Unix(), "inbounds": out})
 }
@@ -152,35 +157,7 @@ func (a *AgentAPI) upsert(c *gin.Context) {
 		apiError(c, err)
 		return
 	}
-	var existing model.Inbound
-	err := database.GetDB().Where("manager_account_id = ?", payload.ManagerAccountID).First(&existing).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		var conflict int64
-		if err := database.GetDB().Model(&model.Inbound{}).Where("port = ?", port).Count(&conflict).Error; err != nil {
-			apiError(c, err)
-			return
-		}
-		if conflict > 0 {
-			c.JSON(409, gin.H{"error": "port already used"})
-			return
-		}
-		var owner model.User
-		if err := database.GetDB().Where("username = ?", model.AdminUsername).First(&owner).Error; err != nil {
-			apiError(c, err)
-			return
-		}
-		payload.Id = 0
-		payload.UserId = owner.Id
-		payload.Tag = "inbound-" + strconv.Itoa(port)
-		err = a.inbounds.AddInbound(&payload)
-	} else if err == nil {
-		payload.Id = existing.Id
-		payload.UserId = existing.UserId
-		err = a.inbounds.UpdateInbound(&payload)
-	} else {
-		apiError(c, err)
-		return
-	}
+	err := service.UpsertManagedInbound(payload)
 	if err != nil {
 		apiError(c, err)
 		return

@@ -75,13 +75,25 @@ func (s *ServerManagementService) NodeUsage(port int) ([]NodeUsage, error) {
 	}
 	out := make([]NodeUsage, 0, len(nodes))
 	for _, node := range nodes {
-		if !node.Enabled {
+		if !node.Enabled || !account.TargetsNode(node.Id) {
 			continue
 		}
-		var row model.NodeTraffic
-		err := database.GetDB().Where("node_id = ? AND account_id = ?", node.Id, account.Id).First(&row).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		var readings []model.NodeTraffic
+		if err := database.GetDB().Where("node_id = ? AND (account_id = ? OR (account_id < 0 AND port = ?))", node.Id, account.Id, account.Port).Find(&readings).Error; err != nil {
 			return nil, err
+		}
+		row := model.NodeTraffic{Enabled: len(readings) > 0}
+		for _, reading := range readings {
+			row.Port = reading.Port
+			row.Up += reading.Up
+			row.Down += reading.Down
+			row.Enabled = row.Enabled && reading.Enabled
+			if reading.ObservedAt > row.ObservedAt {
+				row.ObservedAt = reading.ObservedAt
+			}
+			if reading.DisabledBy != "" {
+				row.DisabledBy = reading.DisabledBy
+			}
 		}
 		out = append(out, NodeUsage{NodeID: node.Id, Name: node.Name, RemotePort: row.Port, Up: row.Up, Down: row.Down, Used: row.Up + row.Down, UsedText: FormatTrafficSize(row.Up + row.Down), Enabled: row.Enabled, DisabledBy: row.DisabledBy, ObservedAt: row.ObservedAt, LastError: node.LastError})
 	}
@@ -121,10 +133,14 @@ func (s *ServerManagementService) Traffic() ([]*entity.ServerTraffic, error) {
 				return err
 			}
 			for _, in := range reply.Inbounds {
-				if in.AccountID <= 0 || in.Port <= 0 || in.Up < 0 || in.Down < 0 {
+				if in.AccountID < 0 || (in.AccountID == 0 && in.LocalID <= 0) || in.Port <= 0 || in.Port > 65535 || in.Up < 0 || in.Down < 0 {
 					return errors.New("被控端返回了无效流量")
 				}
-				row := model.NodeTraffic{NodeID: node.Id, AccountID: in.AccountID, Port: in.Port, Up: in.Up, Down: in.Down, Enabled: in.Enabled, DisabledBy: in.DisabledBy, ManagerRevision: in.ManagerRevision, ObservedAt: time.Now().Unix()}
+				accountID := in.AccountID
+				if accountID == 0 {
+					accountID = -in.LocalID
+				}
+				row := model.NodeTraffic{NodeID: node.Id, AccountID: accountID, Port: in.Port, Up: in.Up, Down: in.Down, Enabled: in.Enabled, DisabledBy: in.DisabledBy, ManagerRevision: in.ManagerRevision, ObservedAt: time.Now().Unix(), Username: in.Username, Total: in.Total, ExpiryTime: in.ExpiryTime, MonthlyReset: in.MonthlyReset}
 				if err := tx.Create(&row).Error; err != nil {
 					return err
 				}
@@ -175,8 +191,10 @@ func (s *ServerManagementService) getTrafficCache() ([]*entity.ServerTraffic, er
 		return nil, err
 	}
 	portByID := map[int]int{}
+	managedPorts := map[int]bool{}
 	for _, in := range accounts {
 		portByID[in.Id] = in.Port
+		managedPorts[in.Port] = true
 	}
 	var rows []model.NodeTraffic
 	if err := database.GetDB().Find(&rows).Error; err != nil {
@@ -185,6 +203,9 @@ func (s *ServerManagementService) getTrafficCache() ([]*entity.ServerTraffic, er
 	by := map[int]*entity.ServerTraffic{}
 	for _, row := range rows {
 		port, exists := portByID[row.AccountID]
+		if row.AccountID < 0 {
+			port, exists = row.Port, managedPorts[row.Port]
+		}
 		if !exists {
 			continue
 		}
@@ -291,11 +312,18 @@ func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSumma
 		return nil, err
 	}
 	perNode := make(map[int]map[int]model.NodeTraffic)
+	localByPort := make(map[int]map[int]model.NodeTraffic)
 	for _, reading := range readings {
 		if perNode[reading.NodeID] == nil {
 			perNode[reading.NodeID] = map[int]model.NodeTraffic{}
 		}
 		perNode[reading.NodeID][reading.AccountID] = reading
+		if reading.AccountID < 0 {
+			if localByPort[reading.NodeID] == nil {
+				localByPort[reading.NodeID] = map[int]model.NodeTraffic{}
+			}
+			localByPort[reading.NodeID][reading.Port] = reading
+		}
 	}
 	setting, err := s.GetSetting()
 	if err != nil {
@@ -310,7 +338,9 @@ func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSumma
 		return nil, err
 	}
 	out := make([]*entity.TrafficSummary, 0, len(accounts))
+	managedPorts := map[int]bool{}
 	for _, in := range accounts {
+		managedPorts[in.Port] = true
 		var used int64
 		remoteEnabled := true
 		known := false
@@ -318,11 +348,14 @@ func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSumma
 			used = r.Used
 		}
 		for _, node := range nodes {
-			if !node.Enabled {
+			if !node.Enabled || !in.TargetsNode(node.Id) {
 				continue
 			}
 			reading, exists := perNode[node.Id][in.Id]
-			if !exists || reading.Port != in.Port || reading.ManagerRevision != inboundRevision(&in) || node.LastError != "" || time.Since(time.Unix(reading.ObservedAt, 0)) > time.Duration(setting.HeartbeatMinutes*2)*time.Minute {
+			if !exists {
+				reading, exists = localByPort[node.Id][in.Port]
+			}
+			if !exists || reading.Port != in.Port || (reading.AccountID > 0 && reading.ManagerRevision != nodeInboundRevision(&in, node.Id)) || node.LastError != "" || time.Since(time.Unix(reading.ObservedAt, 0)) > time.Duration(setting.HeartbeatMinutes*2)*time.Minute {
 				known = false
 				break
 			}
@@ -341,6 +374,22 @@ func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSumma
 			MonthlyReset: in.MonthlyReset, Overlimit: over, Status: status,
 			LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(local + used), LimitText: FormatTrafficLimit(in.Total)})
 	}
+	if inboundID == 0 {
+		for _, node := range nodes {
+			for _, reading := range readings {
+				if reading.NodeID != node.Id || reading.AccountID >= 0 || managedPorts[reading.Port] {
+					continue
+				}
+				used := reading.Up + reading.Down
+				over := TrafficOverlimit(used, 0, reading.Total)
+				status := TrafficStatusOf(reading.Enabled, over)
+				if node.LastError != "" || !node.Enabled || time.Since(time.Unix(reading.ObservedAt, 0)) > time.Duration(setting.HeartbeatMinutes*2)*time.Minute {
+					status = "unknown"
+				}
+				out = append(out, &entity.TrafficSummary{NodeID: node.Id, NodeName: node.Name, LocalInboundID: -reading.AccountID, Username: reading.Username, Port: reading.Port, Remote: used, Total: used, Limit: reading.Total, ExpiryTime: reading.ExpiryTime, Enable: reading.Enabled, MonthlyReset: reading.MonthlyReset, Overlimit: over, Status: status, LocalText: FormatTrafficSize(0), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(used), LimitText: FormatTrafficLimit(reading.Total), Up: reading.Up, Down: reading.Down, ObservedAt: reading.ObservedAt, LastError: node.LastError})
+			}
+		}
+	}
 	return out, nil
 }
 
@@ -354,6 +403,9 @@ func (s *ServerManagementService) enforceLimits() error {
 		return err
 	}
 	for _, row := range rows {
+		if row.LocalInboundID > 0 {
+			continue
+		}
 		var reason string
 		var account model.Inbound
 		if err := database.GetDB().First(&account, row.InboundId).Error; err != nil {
@@ -574,13 +626,17 @@ func (s *ServerManagementService) TrafficResetSnapshots(inboundID int) (*entity.
 
 // RemoteInbounds reads every enabled node for subscription generation.
 func (s *ServerManagementService) RemoteInbounds(port int) ([]map[string]interface{}, error) {
+	var account model.Inbound
+	if err := database.GetDB().Where("port = ?", port).First(&account).Error; err != nil {
+		return nil, err
+	}
 	nodes, err := s.Nodes()
 	if err != nil {
 		return nil, err
 	}
 	out := make([]map[string]interface{}, 0, len(nodes))
 	for _, node := range nodes {
-		if !node.Enabled {
+		if !node.Enabled || !account.TargetsNode(node.Id) {
 			continue
 		}
 		var inbound model.Inbound

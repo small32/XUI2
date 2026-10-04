@@ -1,10 +1,47 @@
 {{define "inboundModal"}}
+<script type="text/x-template" id="node-protocol-editor">
+<div>
+    <a-form layout="inline">
+        <a-form-item label="此节点协议"><a-select v-model="inbound.protocol" style="width:160px"><a-select-option v-for="p in Protocols" :key="p" :value="p">[[p]]</a-select-option></a-select></a-form-item>
+        <a-form-item label="监听 IP"><a-input v-model.trim="inbound.listen"></a-input></a-form-item>
+    </a-form>
+    {{template "form/connection" $}}
+</div>
+</script>
 <a-modal id="inbound-modal" v-model="inModal.visible" :title="inModal.title" @ok="inModal.ok"
          :confirm-loading="inModal.confirmLoading" :closable="true" :mask-closable="false"
          :ok-text="inModal.okText" cancel-text='{{ call $.i18n "close" }}'>
     {{template "form/inbound" $}}
+    <a-form-item v-if="role==='manager'" label="账号统一密码">
+        <a-input-password v-model="inModal.sharedPassword" placeholder="所有带密码协议使用此密码；VLESS/VMess 不使用"></a-input-password>
+    </a-form-item>
+    <a-form-item v-if="role==='manager'" label="下发被控端">
+        <a-checkbox v-model="inModal.allNodes">所有被控端（含以后新增的节点）</a-checkbox>
+        <a-select v-if="!inModal.allNodes" mode="multiple" v-model="inModal.selectedNodes" placeholder="选择要下发的被控端" style="width:100%;margin-top:8px">
+            <a-select-option v-for="node in inModal.nodes" :key="node.id" :value="node.id">[[node.name]][[node.enabled?'':'（停用）']]</a-select-option>
+        </a-select>
+        <div v-if="!inModal.allNodes" style="margin-top:8px">只向所选的启用节点下发；取消选择后会移除该节点上的此受管账号。</div>
+    </a-form-item>
+    <template v-if="role==='manager'">
+        <a-divider>各被控端协议与连接设置</a-divider>
+        <a-alert type="info" show-icon message="各节点可使用不同协议、传输和 TLS 设置。备注、端口、额度、计费方式、到期时间和密码共用上方账号设置；VLESS/VMess 的 UUID 可单独设置。"></a-alert>
+        <a-tabs>
+            <a-tab-pane v-for="node in inModal.nodes.filter(n=>inModal.allNodes||inModal.selectedNodes.includes(n.id))" :key="node.id" :tab="node.name">
+                <a-checkbox :checked="!!inModal.overrides[node.id]" @change="e=>toggleOverride(node.id,e.target.checked)">为此被控端单独设置协议</a-checkbox>
+                <node-protocol-editor v-if="inModal.overrides[node.id]" :key="inModal.session+':'+node.id" :base="inModal.inbound" :initial="inModal.overrides[node.id]" :shared-password="inModal.sharedPassword" @change="value=>$set(inModal.overrides,node.id,value)"></node-protocol-editor>
+                <p v-else>使用上方默认协议和连接设置。</p>
+            </a-tab-pane>
+        </a-tabs>
+    </template>
 </a-modal>
 <script>
+    function applyEditorPassword(inbound,password){
+        if(!password)return;
+        if(inbound.protocol===Protocols.TROJAN)inbound.settings.clients.forEach(c=>c.password=password);
+        if(inbound.protocol===Protocols.SHADOWSOCKS)inbound.settings.password=password;
+        if(inbound.protocol===Protocols.SOCKS||inbound.protocol===Protocols.HTTP){inbound.settings.accounts.forEach(a=>a.pass=password);if(inbound.protocol===Protocols.SOCKS)inbound.settings.auth='password';}
+    }
+    function nodeEditorConfig(inbound){return {protocol:inbound.protocol,listen:inbound.listen,settings:inbound.settings.toString(),streamSettings:inbound.stream.toString(),sniffing:inbound.canSniffing()?inbound.sniffing.toString():'{}'};}
 
     const inModal = {
         title: '',
@@ -14,7 +51,19 @@
         confirm: null,
         inbound: new Inbound(),
         dbInbound: new DBInbound(),
+        allNodes: true,
+        selectedNodes: [],
+        nodes: [],
+        overrides: {},
+        sharedPassword: '',
+        session: 0,
         ok() {
+            if(role==='manager'){
+                applyEditorPassword(inModal.inbound,inModal.sharedPassword);
+                inModal.dbInbound.targetNodes=inModal.allNodes?'':JSON.stringify(inModal.selectedNodes);
+                inModal.dbInbound.nodeConfigs=JSON.stringify(inModal.overrides);
+                inModal.dbInbound.sharedPassword=inModal.sharedPassword;
+            }
             ObjectUtil.execute(inModal.confirm, inModal.inbound, inModal.dbInbound);
         },
         async show({ title='', okText='确定', inbound=null, dbInbound=null, confirm=(inbound, dbInbound)=>{} }) {
@@ -29,6 +78,16 @@
                 this.dbInbound = new DBInbound(dbInbound);
             } else {
                 this.dbInbound = new DBInbound();
+            }
+            this.allNodes=this.dbInbound.targetNodes==='';
+            this.selectedNodes=this.allNodes?[]:JSON.parse(this.dbInbound.targetNodes);
+            this.overrides=this.dbInbound.nodeConfigs?JSON.parse(this.dbInbound.nodeConfigs):{};
+            this.sharedPassword=this.dbInbound.sharedPassword||this.inbound.password||'';
+            this.session++;
+            if(role==='manager'){
+                const nodes=await HttpUtil.post('/xui/server/nodes/list');
+                if(!nodes.success)return;
+                this.nodes=nodes.obj||[];
             }
             const setting = await HttpUtil.post('/xui/setting/all');
             if (!setting.success) { Vue.prototype.$message.error('读取面板证书设置失败'); return; }
@@ -57,14 +116,23 @@
         SOCKS: Protocols.SOCKS,
         HTTP: Protocols.HTTP,
     };
+    Vue.component('node-protocol-editor',{
+        template:'#node-protocol-editor',delimiters:['[[',']]'],props:['base','initial','sharedPassword'],
+        data(){const json=this.base.toJson();const c=this.initial;return {role:'manager',Protocols:protocols,SSMethods,FLOW_CONTROL,inbound:Inbound.fromJson({...json,protocol:c.protocol,listen:c.listen,settings:JSON.parse(c.settings),streamSettings:JSON.parse(c.streamSettings),sniffing:JSON.parse(c.sniffing)})};},
+        watch:{inbound:{deep:true,handler(){this.publish();}},sharedPassword(){this.publish();}},
+        methods:{publish(){applyEditorPassword(this.inbound,this.sharedPassword);this.$emit('change',nodeEditorConfig(this.inbound));},streamNetworkChange(oldValue){if(oldValue==='kcp')this.inbound.tls=false;}},
+        mounted(){this.publish();}
+    });
 
     new Vue({
         delimiters: ['[[', ']]'],
         el: '#inbound-modal',
         data: {
+            role,
             inModal: inModal,
             Protocols: protocols,
             SSMethods: SSMethods,
+            FLOW_CONTROL,
             get inbound() {
                 return inModal.inbound;
             },
@@ -73,12 +141,14 @@
             }
         },
         methods: {
+            toggleOverride(id,enabled){if(enabled)this.$set(inModal.overrides,id,nodeEditorConfig(inModal.inbound));else this.$delete(inModal.overrides,id);},
             streamNetworkChange(oldValue) {
                 if (oldValue === 'kcp') {
                     this.inModal.inbound.tls = false;
                 }
             }
         }
+        ,watch:{'inModal.sharedPassword'(){if(role==='manager')applyEditorPassword(inModal.inbound,inModal.sharedPassword);},'inModal.inbound.protocol'(){if(role==='manager')applyEditorPassword(inModal.inbound,inModal.sharedPassword);}}
     });
 
 </script>
