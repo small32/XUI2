@@ -697,6 +697,11 @@ func TestDisabledNodeFinishesOutstandingMonthlyReset(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	sqlDB, err := database.GetDB().DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { sqlDB.Close() })
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/traffic/reset") {
@@ -721,9 +726,6 @@ func TestDisabledNodeFinishesOutstandingMonthlyReset(t *testing.T) {
 	}
 	if err := enqueue(database.GetDB(), nodes[0].Id, &in, "reset", "reset-"+strconv.Itoa(period)+"-1-1"); err != nil {
 		t.Fatal(err)
-	}
-	if err := s.ForceDeleteNode(nodes[0].Id); err == nil {
-		t.Fatal("force removal discarded a monthly reset")
 	}
 	if err := s.MaybeMonthlyReset(); err != nil {
 		t.Fatal(err)

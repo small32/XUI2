@@ -17,7 +17,7 @@
 <a-table-column title="启用数"><template slot-scope="text,row">[[row.enabledCount||0]]</template></a-table-column>
 <a-table-column title="最近连接"><template slot-scope="text,row">[[row.lastSeen?new Date(row.lastSeen*1000).toLocaleString():'尚未连接']]</template></a-table-column>
 <a-table-column title="错误"><template slot-scope="text,row">[[row.lastError||'-']]</template></a-table-column>
-<a-table-column title="操作"><template slot-scope="text,row"><a-button type="link" @click="edit(row)">编辑</a-button><a-popconfirm title="将先删除该被控端上的受管账号，再移除节点。连接失败时不会移除，确定继续吗？" @confirm="remove(row)"><a-button type="link">删除</a-button></a-popconfirm><a-popconfirm title="强制移除不会删除旧服务器上的账号；请先停机或手动清理旧服务器。仍要移除管理记录吗？" @confirm="forceRemove(row)"><a-button type="link" danger>强制移除</a-button></a-popconfirm></template></a-table-column>
+<a-table-column title="操作"><template slot-scope="text,row"><a-button type="link" @click="edit(row)">编辑</a-button><a-popconfirm title="将先删除该被控端上的受管账号，再移除节点。连接失败时不会移除，确定继续吗？" @confirm="remove(row)"><a-button type="link">删除</a-button></a-popconfirm><a-popconfirm title="强制移除将直接移除节点并清除全部同步任务（含未完成月度任务），保留已有历史快照，不删除被控端上的账号。确定移除吗？" @confirm="forceRemove(row)"><a-button type="link" danger>强制移除</a-button></a-popconfirm></template></a-table-column>
 </a-table>
 <a-divider>[[node.id?'编辑被控端':'添加被控端']]</a-divider>
 <a-form layout="vertical">

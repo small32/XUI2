@@ -306,8 +306,8 @@ func (s *ServerManagementService) DeleteNode(id int) error {
 	})
 }
 
-// ForceDeleteNode is an explicit offline detach. It cannot discard an
-// unfinished monthly reset because that would silently falsify the archive.
+// ForceDeleteNode detaches locally and discards every task for the node,
+// including unfinished monthly resets, without contacting the agent.
 func (s *ServerManagementService) ForceDeleteNode(id int) error {
 	managerRemoteMu.Lock()
 	defer managerRemoteMu.Unlock()
@@ -316,13 +316,6 @@ func (s *ServerManagementService) ForceDeleteNode(id int) error {
 	var node model.ManagedNode
 	if err := database.GetDB().First(&node, id).Error; err != nil {
 		return err
-	}
-	var monthly int64
-	if err := database.GetDB().Model(&model.SyncTask{}).Where("node_id = ? AND kind = ? AND status IN ?", id, "reset", []string{"pending", "inflight"}).Count(&monthly).Error; err != nil {
-		return err
-	}
-	if monthly > 0 {
-		return fmt.Errorf("该节点仍有 %d 个未完成的月度重置任务，无法强制移除；请恢复节点连接并完成结算", monthly)
 	}
 	return database.GetDB().Transaction(func(tx *gorm.DB) error {
 		if err := preserveHistoricalNodeName(tx, id, node.Name); err != nil {
