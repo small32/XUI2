@@ -94,4 +94,4 @@ go build ./...
 bash -n install.sh
 ```
 
-Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.2.2`；提交到 `main` 不会自动发布 Release。
+Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.2.3`；提交到 `main` 不会自动发布 Release。

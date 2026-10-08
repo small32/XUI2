@@ -50,8 +50,9 @@
                         <a-checkbox-group v-if="!restricted" v-model="filters" style="margin-top: 16px">
                             <a-checkbox value="enabled">已启用</a-checkbox>
                             <a-checkbox value="disabled">已停用</a-checkbox>
-                        <a-checkbox value="overlimit">已超限</a-checkbox>
-                        <a-checkbox value="unknown">未确认</a-checkbox>
+                            <a-checkbox value="overlimit">已超限</a-checkbox>
+                            <a-checkbox value="unknown">未确认</a-checkbox>
+                            <a-checkbox v-if="role === 'manager'" value="expiring">快到期</a-checkbox>
                         </a-checkbox-group>
                         <a-table :columns="columns" :row-key="dbInbound => dbInbound.id"
                                  :data-source="visibleInbounds"
@@ -482,7 +483,16 @@
             },
             visibleInbounds() {
                 if (restricted || !this.filters.length) return this.dbInbounds;
-                return this.dbInbounds.filter(inbound => this.filters.indexOf(this.statusOf(inbound)) >= 0);
+                const expiring = role === 'manager' && this.filters.includes('expiring');
+                const statusFilters = this.filters.filter(value => value !== 'expiring');
+                const now = Date.now();
+                const week = 7 * 24 * 60 * 60 * 1000;
+                return this.dbInbounds.filter(inbound => {
+                    if (statusFilters.length && !statusFilters.includes(this.statusOf(inbound))) return false;
+                    if (!expiring) return true;
+                    const remaining = inbound.expiryTime - now;
+                    return inbound.expiryTime > 0 && remaining >= 0 && remaining <= week;
+                });
             }
         },
     });
