@@ -659,6 +659,7 @@ func (s *ServerManagementService) RemoteInbounds(port int) ([]map[string]interfa
 		}
 		// 历史数据里可能存着带协议前缀或端口的订阅地址，归一后再交给前端拼节点链接。
 		item["remoteName"], item["remoteAddress"] = node.Name, hostOnlyAddress(node.Address)
+		item["trafficMultiplier"] = nodeTrafficMultiplier(node)
 		out = append(out, item)
 	}
 	return out, nil

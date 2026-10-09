@@ -76,7 +76,7 @@ func TestDifferentNodeProtocolsSurviveDispatchReconciliationAndSubscription(t *t
 	input := testNodeInput(agent, true)
 	var nodes []model.ManagedNode
 	for _, token := range []string{"trojan-node", "vless-node"} {
-		n := model.ManagedNode{Name: token, Token: token, URL: input.URL, Address: token + ".example", CertSHA256: input.CertSHA256, Enabled: true}
+		n := model.ManagedNode{TrafficMultiplier: multiplier(0.1 * float64(len(nodes))), Name: token, Token: token, URL: input.URL, Address: token + ".example", CertSHA256: input.CertSHA256, Enabled: true}
 		if err := db.Create(&n).Error; err != nil {
 			t.Fatal(err)
 		}
@@ -121,6 +121,9 @@ func TestDifferentNodeProtocolsSurviveDispatchReconciliationAndSubscription(t *t
 	remote, err := s.RemoteInbounds(in.Port)
 	if err != nil || len(remote) != 2 || remote[0]["protocol"] != "trojan" || remote[1]["protocol"] != "vless" {
 		t.Fatalf("subscription did not merge node protocols: %+v %v", remote, err)
+	}
+	if remote[0]["trafficMultiplier"] != float64(0) || remote[1]["trafficMultiplier"] != 0.1 {
+		t.Fatalf("node details must expose zero and decimal multipliers: %+v", remote)
 	}
 	masked, err := WithLoginPassword(model.VLESS, actual["Bearer vless-node"].Settings, "shared-secret")
 	if err != nil || masked != actual["Bearer vless-node"].Settings {

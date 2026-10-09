@@ -1,17 +1,29 @@
 {{define "inboundInfoModal"}}
 {{template "component/inboundInfo" $}}
 <a-modal id="inbound-info-modal" v-model="infoModal.visible" title="详细信息" @ok="infoModal.ok"
-         :closable="true" :mask-closable="true"
+         :closable="true" :mask-closable="true" :width="infoModal.nodeInfos.length > 2 ? 1180 : (infoModal.nodeInfos.length > 1 ? 820 : 520)"
          ok-text="复制链接" cancel-text='{{ call $.i18n "close" }}' :ok-button-props="infoModal.okBtnPros">
-    <template v-if="infoModal.nodeInfos.length">
-        <div v-for="(ni, i) in infoModal.nodeInfos" :key="i">
-            <a-divider v-if="i > 0"></a-divider>
-            <p v-if="infoModal.nodeInfos.length > 1"><a-tag color="blue">节点：[[ ni.name ]]</a-tag></p>
+    <div v-if="infoModal.nodeInfos.length" class="node-info-grid" :class="'node-info-count-'+Math.min(infoModal.nodeInfos.length,3)">
+        <div v-for="(ni, i) in infoModal.nodeInfos" :key="i" class="node-info-card">
+            <p v-if="role === 'manager'" class="node-info-heading">
+                <a-tag color="blue">节点：[[ ni.name ]]</a-tag>
+                <span>节点倍率 <strong class="node-info-multiplier">[[ ni.trafficMultiplier ]]×</strong></span>
+            </p>
             <inbound-info :db-inbound="ni.dbInbound" :inbound="ni.inbound"></inbound-info>
         </div>
-    </template>
+    </div>
     <inbound-info v-else :db-inbound="dbInbound" :inbound="inbound"></inbound-info>
 </a-modal>
+<style>
+    .node-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+    .node-info-count-1 { grid-template-columns: minmax(0, 1fr); }
+    .node-info-count-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .node-info-card { min-width: 0; overflow-wrap: anywhere; }
+    .node-info-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    .node-info-multiplier { color: #ff0000; font-size: 20px; font-weight: 700; }
+    @media (max-width: 1000px) { .node-info-count-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 700px) { .node-info-grid { grid-template-columns: minmax(0, 1fr); } }
+</style>
 <script>
 
     const infoModal = {
@@ -44,15 +56,15 @@
                 this.okBtnPros.attrs.style = "display: none";
             }
         },
-        // 每台被控端一行配置：地址取被控端自己的订阅地址，而非管理端。
+        // 每台被控端一份配置：地址取被控端自己的订阅地址，而非管理端。
         async fillNodeInfos(dbInbound) {
             const remoteObjects = await app.loadRemoteInbounds(dbInbound);
             if (!remoteObjects) return;
             const infos = remoteObjects.map(ro => {
                 const d = new DBInbound(ro);
-                return { name: (ro.remoteName || '').trim() || dbInbound.remark, dbInbound: d, inbound: d.toInbound() };
+                return { trafficMultiplier: ro.trafficMultiplier == null ? 1 : ro.trafficMultiplier, name: (ro.remoteName || '').trim() || dbInbound.remark, dbInbound: d, inbound: d.toInbound() };
             });
-            this.nodeInfos = infos.length ? infos : [{ name: dbInbound.remark, dbInbound: this.dbInbound, inbound: this.inbound }];
+            this.nodeInfos = infos.length ? infos : [{ trafficMultiplier: 1, name: dbInbound.remark, dbInbound: this.dbInbound, inbound: this.inbound }];
         },
         async ok() {
             const text = await this.linkText();
@@ -89,6 +101,7 @@
         el: '#inbound-info-modal',
         data: {
             infoModal,
+            role,
             get dbInbound() {
                 return this.infoModal.dbInbound;
             },
