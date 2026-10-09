@@ -52,13 +52,14 @@ func (e *agentHTTPError) Error() string {
 }
 
 type NodeInput struct {
-	ID         int    `json:"id" form:"id"`
-	Name       string `json:"name" form:"name"`
-	URL        string `json:"url" form:"url"`
-	Address    string `json:"address" form:"address"`
-	Token      string `json:"token" form:"token"`
-	CertSHA256 string `json:"certSha256" form:"certSha256"`
-	Enabled    bool   `json:"enabled" form:"enabled"`
+	TrafficMultiplier *float64 `json:"trafficMultiplier" form:"trafficMultiplier"`
+	ID                int      `json:"id" form:"id"`
+	Name              string   `json:"name" form:"name"`
+	URL               string   `json:"url" form:"url"`
+	Address           string   `json:"address" form:"address"`
+	Token             string   `json:"token" form:"token"`
+	CertSHA256        string   `json:"certSha256" form:"certSha256"`
+	Enabled           bool     `json:"enabled" form:"enabled"`
 }
 
 type agentTraffic struct {
@@ -188,6 +189,9 @@ func (s *ServerManagementService) Nodes() ([]model.ManagedNode, error) {
 }
 
 func (s *ServerManagementService) SaveNode(input NodeInput) error {
+	if err := validateTrafficMultiplier(input.TrafficMultiplier); err != nil {
+		return err
+	}
 	u, err := url.Parse(strings.TrimSpace(input.URL))
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return errors.New("API 地址必须是 HTTPS 站点根地址")
@@ -213,6 +217,10 @@ func (s *ServerManagementService) SaveNode(input NodeInput) error {
 	}
 	if input.Token != "" {
 		node.Token = input.Token
+	}
+	if input.TrafficMultiplier != nil {
+		value := *input.TrafficMultiplier
+		node.TrafficMultiplier = &value
 	}
 	if len(node.Token) < 32 {
 		return errors.New("API 令牌至少 32 字符")
@@ -757,7 +765,7 @@ func (s *ServerManagementService) DispatchPending() error {
 			}
 			if err = json.Unmarshal(result, &usage); err == nil {
 				period, _ := strconv.Atoi(strings.Split(task.OperationID, "-")[1])
-				snap := model.NodeTrafficSnapshot{NodeID: task.NodeID, NodeName: node.Name, AccountID: task.AccountID, Yyyymm: period, Port: task.Port, Up: usage.Up, Down: usage.Down, ResetAt: time.Now().Unix()}
+				snap := model.NodeTrafficSnapshot{NodeID: task.NodeID, NodeName: node.Name, AccountID: task.AccountID, Yyyymm: period, Port: task.Port, Up: scaledNodeTraffic(usage.Up, node), Down: scaledNodeTraffic(usage.Down, node), ResetAt: time.Now().Unix()}
 				err = database.GetDB().Transaction(func(tx *gorm.DB) error {
 					if err := tx.Where("node_id = ? AND account_id = ? AND yyyymm = ?", snap.NodeID, snap.AccountID, snap.Yyyymm).FirstOrCreate(&snap).Error; err != nil {
 						return err

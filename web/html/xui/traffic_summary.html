@@ -55,12 +55,14 @@
                     </a-table-column>
                     <a-table-column title="节点明细"><template slot-scope="text,row"><a-button type="link" size="small" @click="openNodes(row)">查看</a-button></template></a-table-column>
                 </a-table>
-                <a-modal v-model="nodesModal.visible" :title="nodesModal.title" :footer="null" width="820px">
-                    <a-table :data-source="nodesModal.rows" row-key="nodeId" :pagination="false" size="small">
+                <a-modal v-model="nodesModal.visible" :title="nodesModal.title" :footer="null" width="1060px">
+                    <a-table :scroll="{x:1000}" :data-source="nodesModal.rows" row-key="nodeId" :pagination="false" size="small">
                         <a-table-column title="节点" data-index="name"></a-table-column>
                         <a-table-column title="实际端口" data-index="remotePort"></a-table-column>
                         <a-table-column title="上传" ><template slot-scope="text,row">[[sizeFormat(row.up)]]</template></a-table-column>
                         <a-table-column title="下载" ><template slot-scope="text,row">[[sizeFormat(row.down)]]</template></a-table-column>
+                        <a-table-column title="流量倍率" data-index="trafficMultiplier"></a-table-column>
+                        <a-table-column title="实际用量" data-index="actualUsedText"></a-table-column>
                         <a-table-column title="用量" data-index="usedText"></a-table-column>
                         <a-table-column title="更新时间"><template slot-scope="text,row">[[row.observedAt?new Date(row.observedAt*1000).toLocaleString():'暂无数据']]</template></a-table-column>
                         <a-table-column title="状态"><template slot-scope="text,row">[[row.lastError?'读取失败：'+row.lastError:(row.observedAt?(row.enabled?'启用':'停用'):'待同步')]]</template></a-table-column>
@@ -114,7 +116,7 @@
                 this.nodesModal.rows=[];
                 this.nodesModal.visible=true;
                 if(row.localInboundId){
-                    this.nodesModal.rows=[{nodeId:row.nodeId,name:row.nodeName,remotePort:row.port,up:row.up,down:row.down,usedText:row.totalText,observedAt:row.observedAt,enabled:row.enable,lastError:row.lastError}];
+                    this.nodesModal.rows=[{nodeId:row.nodeId,name:row.nodeName,remotePort:row.port,up:row.up,down:row.down,trafficMultiplier:row.trafficMultiplier,actualUsedText:row.actualUsedText,usedText:row.totalText,observedAt:row.observedAt,enabled:row.enable,lastError:row.lastError}];
                     return;
                 }
                 let m=await HttpUtil.post('/xui/traffic-summary/nodes/'+row.port);

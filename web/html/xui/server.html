@@ -13,6 +13,7 @@
 <a-table-column title="名称" data-index="name"></a-table-column>
 <a-table-column title="API 地址" data-index="url"></a-table-column>
 <a-table-column title="订阅地址" data-index="address"></a-table-column>
+<a-table-column title="流量倍率"><template slot-scope="text,row">[[row.trafficMultiplier == null ? 1 : row.trafficMultiplier]]</template></a-table-column>
 <a-table-column title="状态"><template slot-scope="text,row"><a-tag :color="row.enabled?'green':'orange'">[[row.enabled?'启用':'停用']]</a-tag></template></a-table-column>
 <a-table-column title="入站数"><template slot-scope="text,row">[[row.inboundCount||0]]</template></a-table-column>
 <a-table-column title="总流量"><template slot-scope="text,row">[[row.usedText||'-']]</template></a-table-column>
@@ -29,6 +30,7 @@
 <a-form-item label="被控端 API 令牌"><a-input-password v-model="node.token" placeholder="编辑时留空则保留原令牌"></a-input-password></a-form-item>
 <a-form-item label="证书 SHA256 指纹（自签名证书时填写）"><a-input v-model.trim="node.certSha256" placeholder="64 位十六进制；公开可信证书可留空"></a-input></a-form-item>
 <a-form-item label="启用"><a-switch v-model="node.enabled"></a-switch></a-form-item>
+<a-form-item label="流量倍率"><a-input-number v-model="node.trafficMultiplier" :min="0" :step="0.1" style="width:100%"></a-input-number><span>管理端按节点实际流量 × 倍率计算用量；默认 1，支持 0 和小数。</span></a-form-item>
 <a-button type="primary" :loading="loading" @click="saveNode">保存被控端</a-button><a-button style="margin-left:8px" @click="resetForm">清空</a-button>
 </a-form>
 <a-divider>管理端设置</a-divider>
@@ -53,12 +55,12 @@
 {{template "js" .}}
 {{template "nodeInboundBrowser" .}}
 <script>
-const emptyNode=()=>({id:0,name:'',url:'',address:'',token:'',certSha256:'',enabled:true});
+const emptyNode=()=>({id:0,name:'',url:'',address:'',token:'',certSha256:'',enabled:true,trafficMultiplier:1});
 new Vue({delimiters:['[[',']]'],el:'#app',data:{siderDrawer,loading:false,nodes:[],tasks:[],node:emptyNode(),setting:{autoDisable:true,heartbeatMinutes:10}},computed:{pendingCount(){return this.tasks.filter(t=>t.status==='pending').length;},abandonedCount(){return this.tasks.filter(t=>t.status==='abandoned').length;}},methods:{
  async load(){let [nodes,tasks,setting]=await Promise.all([HttpUtil.post('/xui/server/nodes/list'),HttpUtil.post('/xui/server/tasks'),HttpUtil.post('/xui/server/setting/all')]);if(nodes.success)this.nodes=nodes.obj||[];if(tasks.success)this.tasks=tasks.obj||[];if(setting.success)this.setting=setting.obj;},
- edit(row){this.node={id:row.id,name:row.name,url:row.url,address:row.address,token:'',certSha256:row.certSha256||'',enabled:row.enabled};},
+ edit(row){this.node={id:row.id,name:row.name,url:row.url,address:row.address,token:'',certSha256:row.certSha256||'',enabled:row.enabled,trafficMultiplier:row.trafficMultiplier == null ? 1 : row.trafficMultiplier};},
  resetForm(){this.node=emptyNode();},
- async saveNode(){this.loading=true;let m=await HttpUtil.post('/xui/server/nodes/save',this.node);this.loading=false;if(m.success){this.$message.success('已保存');this.resetForm();this.load();}else this.$message.error(m.msg);},
+ async saveNode(){if(typeof this.node.trafficMultiplier !== 'number'||!Number.isFinite(this.node.trafficMultiplier)||this.node.trafficMultiplier<0){this.$message.error('流量倍率必须是非负数字');return;}this.loading=true;let m=await HttpUtil.post('/xui/server/nodes/save',this.node);this.loading=false;if(m.success){this.$message.success('已保存');this.resetForm();this.load();}else this.$message.error(m.msg);},
  async remove(row){let m=await HttpUtil.post('/xui/server/nodes/delete/'+row.id);if(m.success){this.$message.success('已删除');this.load();}else this.$message.error(m.msg);},
  async forceRemove(row){let m=await HttpUtil.post('/xui/server/nodes/force-delete/'+row.id);if(m.success){this.$message.success('已强制移除，请确认旧服务器账号已人工清理');this.load();}else this.$message.error(m.msg);},
  async saveSetting(){let m=await HttpUtil.post('/xui/server/setting',this.setting);if(m.success)this.$message.success('已保存');else this.$message.error(m.msg);},

@@ -100,15 +100,16 @@ func (i *Inbound) TargetsNode(nodeID int) bool {
 // ManagedNode is known only to the manager. Tokens are never serialized in
 // browser responses; controller DTOs explicitly omit them.
 type ManagedNode struct {
-	Id         int    `json:"id" gorm:"primaryKey;autoIncrement"`
-	Name       string `json:"name"`
-	URL        string `json:"url"`
-	Address    string `json:"address"`
-	Token      string `json:"-"`
-	CertSHA256 string `json:"certSha256"`
-	Enabled    bool   `json:"enabled"`
-	LastSeen   int64  `json:"lastSeen"`
-	LastError  string `json:"lastError"`
+	TrafficMultiplier *float64 `json:"trafficMultiplier" gorm:"default:1"`
+	Id                int      `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name              string   `json:"name"`
+	URL               string   `json:"url"`
+	Address           string   `json:"address"`
+	Token             string   `json:"-"`
+	CertSHA256        string   `json:"certSha256"`
+	Enabled           bool     `json:"enabled"`
+	LastSeen          int64    `json:"lastSeen"`
+	LastError         string   `json:"lastError"`
 }
 
 type NodeTraffic struct {

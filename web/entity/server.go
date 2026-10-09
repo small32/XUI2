@@ -26,13 +26,16 @@ type ServerTraffic struct {
 	Enable bool  `json:"enable"`
 }
 type TrafficSummary struct {
-	NodeID         int    `json:"nodeId"`
-	NodeName       string `json:"nodeName"`
-	LocalInboundID int    `json:"localInboundId"`
-	Up             int64  `json:"up"`
-	Down           int64  `json:"down"`
-	ObservedAt     int64  `json:"observedAt"`
-	LastError      string `json:"lastError"`
+	TrafficMultiplier float64 `json:"trafficMultiplier"`
+	ActualUsed        int64   `json:"actualUsed"`
+	ActualUsedText    string  `json:"actualUsedText"`
+	NodeID            int     `json:"nodeId"`
+	NodeName          string  `json:"nodeName"`
+	LocalInboundID    int     `json:"localInboundId"`
+	Up                int64   `json:"up"`
+	Down              int64   `json:"down"`
+	ObservedAt        int64   `json:"observedAt"`
+	LastError         string  `json:"lastError"`
 	// InboundId 是入站主键，页面按它拉取该账号的月度留档。
 	InboundId  int    `json:"inboundId"`
 	Username   string `json:"username"`

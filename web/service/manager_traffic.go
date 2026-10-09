@@ -21,17 +21,20 @@ import (
 var trafficMu sync.Mutex
 
 type NodeUsage struct {
-	NodeID     int    `json:"nodeId"`
-	Name       string `json:"name"`
-	RemotePort int    `json:"remotePort"`
-	Up         int64  `json:"up"`
-	Down       int64  `json:"down"`
-	Used       int64  `json:"used"`
-	UsedText   string `json:"usedText"`
-	Enabled    bool   `json:"enabled"`
-	DisabledBy string `json:"disabledBy"`
-	ObservedAt int64  `json:"observedAt"`
-	LastError  string `json:"lastError"`
+	TrafficMultiplier float64 `json:"trafficMultiplier"`
+	ActualUsed        int64   `json:"actualUsed"`
+	ActualUsedText    string  `json:"actualUsedText"`
+	NodeID            int     `json:"nodeId"`
+	Name              string  `json:"name"`
+	RemotePort        int     `json:"remotePort"`
+	Up                int64   `json:"up"`
+	Down              int64   `json:"down"`
+	Used              int64   `json:"used"`
+	UsedText          string  `json:"usedText"`
+	Enabled           bool    `json:"enabled"`
+	DisabledBy        string  `json:"disabledBy"`
+	ObservedAt        int64   `json:"observedAt"`
+	LastError         string  `json:"lastError"`
 }
 
 // ListNodes 返回被控端节点列表，并为每个节点附加本地的入站/流量聚合统计。
@@ -43,22 +46,18 @@ func (s *ServerManagementService) ListNodes() ([]entity.NodeRow, error) {
 	rows := make([]entity.NodeRow, 0, len(nodes))
 	for _, n := range nodes {
 		row := entity.NodeRow{ManagedNode: n}
-		var agg struct {
-			Cnt   int   `gorm:"column:cnt"`
-			Used  int64 `gorm:"column:used"`
-			OnCnt int   `gorm:"column:on_cnt"`
-		}
-		err := database.GetDB().Model(&model.NodeTraffic{}).
-			Where("node_id = ?", n.Id).
-			Select("COUNT(*) AS cnt, COALESCE(SUM(up + down), 0) AS used, SUM(CASE WHEN enabled THEN 1 ELSE 0 END) AS on_cnt").
-			Scan(&agg).Error
-		if err != nil {
+		var readings []model.NodeTraffic
+		if err := database.GetDB().Where("node_id = ?", n.Id).Find(&readings).Error; err != nil {
 			return nil, err
 		}
-		row.InboundCount = agg.Cnt
-		row.Used = agg.Used
-		row.UsedText = common.FormatTraffic(agg.Used)
-		row.EnabledCount = agg.OnCnt
+		row.InboundCount = len(readings)
+		for _, reading := range readings {
+			row.Used += scaledNodeTraffic(reading.Up, n) + scaledNodeTraffic(reading.Down, n)
+			if reading.Enabled {
+				row.EnabledCount++
+			}
+		}
+		row.UsedText = common.FormatTraffic(row.Used)
 		rows = append(rows, row)
 	}
 	return rows, nil
@@ -83,7 +82,9 @@ func (s *ServerManagementService) NodeUsage(port int) ([]NodeUsage, error) {
 			return nil, err
 		}
 		row := model.NodeTraffic{Enabled: len(readings) > 0}
+		var used int64
 		for _, reading := range readings {
+			used += scaledNodeTraffic(reading.Up, node) + scaledNodeTraffic(reading.Down, node)
 			row.Port = reading.Port
 			row.Up += reading.Up
 			row.Down += reading.Down
@@ -95,7 +96,7 @@ func (s *ServerManagementService) NodeUsage(port int) ([]NodeUsage, error) {
 				row.DisabledBy = reading.DisabledBy
 			}
 		}
-		out = append(out, NodeUsage{NodeID: node.Id, Name: node.Name, RemotePort: row.Port, Up: row.Up, Down: row.Down, Used: row.Up + row.Down, UsedText: FormatTrafficSize(row.Up + row.Down), Enabled: row.Enabled, DisabledBy: row.DisabledBy, ObservedAt: row.ObservedAt, LastError: node.LastError})
+		out = append(out, NodeUsage{NodeID: node.Id, Name: node.Name, RemotePort: row.Port, Up: row.Up, Down: row.Down, TrafficMultiplier: nodeTrafficMultiplier(node), ActualUsed: row.Up + row.Down, ActualUsedText: FormatTrafficSize(row.Up + row.Down), Used: used, UsedText: FormatTrafficSize(used), Enabled: row.Enabled, DisabledBy: row.DisabledBy, ObservedAt: row.ObservedAt, LastError: node.LastError})
 	}
 	return out, nil
 }
@@ -200,6 +201,11 @@ func (s *ServerManagementService) getTrafficCache() ([]*entity.ServerTraffic, er
 	if err := database.GetDB().Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	nodes, err := s.Nodes()
+	if err != nil {
+		return nil, err
+	}
+	scaleNodeReadings(rows, nodes)
 	by := map[int]*entity.ServerTraffic{}
 	for _, row := range rows {
 		port, exists := portByID[row.AccountID]
@@ -380,13 +386,13 @@ func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSumma
 				if reading.NodeID != node.Id || reading.AccountID >= 0 || managedPorts[reading.Port] {
 					continue
 				}
-				used := reading.Up + reading.Down
+				used := scaledNodeTraffic(reading.Up, node) + scaledNodeTraffic(reading.Down, node)
 				over := TrafficOverlimit(used, 0, reading.Total)
 				status := TrafficStatusOf(reading.Enabled, over)
 				if node.LastError != "" || !node.Enabled || time.Since(time.Unix(reading.ObservedAt, 0)) > time.Duration(setting.HeartbeatMinutes*2)*time.Minute {
 					status = "unknown"
 				}
-				out = append(out, &entity.TrafficSummary{NodeID: node.Id, NodeName: node.Name, LocalInboundID: -reading.AccountID, Username: reading.Username, Port: reading.Port, Remote: used, Total: used, Limit: reading.Total, ExpiryTime: reading.ExpiryTime, Enable: reading.Enabled, MonthlyReset: reading.MonthlyReset, Overlimit: over, Status: status, LocalText: FormatTrafficSize(0), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(used), LimitText: FormatTrafficLimit(reading.Total), Up: reading.Up, Down: reading.Down, ObservedAt: reading.ObservedAt, LastError: node.LastError})
+				out = append(out, &entity.TrafficSummary{NodeID: node.Id, NodeName: node.Name, TrafficMultiplier: nodeTrafficMultiplier(node), ActualUsed: reading.Up + reading.Down, ActualUsedText: FormatTrafficSize(reading.Up + reading.Down), LocalInboundID: -reading.AccountID, Username: reading.Username, Port: reading.Port, Remote: used, Total: used, Limit: reading.Total, ExpiryTime: reading.ExpiryTime, Enable: reading.Enabled, MonthlyReset: reading.MonthlyReset, Overlimit: over, Status: status, LocalText: FormatTrafficSize(0), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(used), LimitText: FormatTrafficLimit(reading.Total), Up: reading.Up, Down: reading.Down, ObservedAt: reading.ObservedAt, LastError: node.LastError})
 			}
 		}
 	}
