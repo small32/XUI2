@@ -1,8 +1,7 @@
 {{define "inboundInfoModal"}}
 {{template "component/inboundInfo" $}}
-<a-modal id="inbound-info-modal" v-model="infoModal.visible" title="详细信息" @ok="infoModal.ok"
-         :closable="true" :mask-closable="true" :width="infoModal.nodeInfos.length > 2 ? 1180 : (infoModal.nodeInfos.length > 1 ? 820 : 520)"
-         ok-text="复制链接" cancel-text='{{ call $.i18n "close" }}' :ok-button-props="infoModal.okBtnPros">
+<a-modal id="inbound-info-modal" v-model="infoModal.visible" title="详细信息"
+         :closable="true" :mask-closable="true" :width="infoModal.nodeInfos.length > 2 ? 1180 : (infoModal.nodeInfos.length > 1 ? 820 : 520)">
     <div v-if="infoModal.nodeInfos.length" class="node-info-grid" :class="'node-info-count-'+Math.min(infoModal.nodeInfos.length,3)">
         <div v-for="(ni, i) in infoModal.nodeInfos" :key="i" class="node-info-card">
             <p v-if="role === 'manager'" class="node-info-heading">
@@ -13,6 +12,9 @@
         </div>
     </div>
     <inbound-info v-else :db-inbound="dbInbound" :inbound="inbound"></inbound-info>
+    <template slot="footer">
+        <a-button @click="infoModal.close">{{ call $.i18n "close" }}</a-button>
+    </template>
 </a-modal>
 <style>
     .node-info-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
@@ -32,12 +34,6 @@
         dbInbound: new DBInbound(),
         // manager 端每台被控端一份配置；非 manager 时仅本机一份。
         nodeInfos: [],
-        okBtnPros: {
-            attrs: {
-                id: "inbound-info-modal-ok-btn",
-                style: "",
-            },
-        },
         show(dbInbound) {
             this.inbound = dbInbound.toInbound();
             this.dbInbound = new DBInbound(dbInbound);
@@ -50,11 +46,6 @@
                 this.nodeInfos = [{ name: this.dbInbound.remark, dbInbound: this.dbInbound, inbound: this.inbound }];
             }
 
-            if (dbInbound.hasLink()) {
-                this.okBtnPros.attrs.style = "";
-            } else {
-                this.okBtnPros.attrs.style = "display: none";
-            }
         },
         // 每台被控端一份配置：地址取被控端自己的订阅地址，而非管理端。
         async fillNodeInfos(dbInbound) {
@@ -65,31 +56,6 @@
                 return { trafficMultiplier: ro.trafficMultiplier == null ? 1 : ro.trafficMultiplier, name: (ro.remoteName || '').trim() || dbInbound.remark, dbInbound: d, inbound: d.toInbound() };
             });
             this.nodeInfos = infos.length ? infos : [{ trafficMultiplier: 1, name: dbInbound.remark, dbInbound: this.dbInbound, inbound: this.inbound }];
-        },
-        async ok() {
-            const text = await this.linkText();
-            if (!text) {
-                app.$message.error('无法生成当前入站的节点链接');
-                return;
-            }
-            try {
-                await navigator.clipboard.writeText(text);
-                app.$message.success('{{ call $.i18n "copied" }}');
-            } catch (e) {
-                app.$message.error('复制失败，请手动复制链接');
-            }
-        },
-        // 管理端有多台被控端时复制全部节点的链接，每行一条，地址取各被控端自己的订阅地址；
-        // 被控端自身面板仍复制本机链接。
-        async linkText() {
-            if (role !== 'manager') {
-                return this.dbInbound.genLink();
-            }
-            const remoteObjects = await app.loadRemoteInbounds(this.dbInbound);
-            if (!remoteObjects) return '';
-            const links = app.nodeLinks(remoteObjects);
-            if (!links) return '';
-            return links.map(item => item.content).join('\n');
         },
         close() {
             infoModal.visible = false;
