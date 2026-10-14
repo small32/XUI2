@@ -96,8 +96,48 @@ go build ./...
 bash -n install.sh
 ```
 
-Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.2.6`；提交到 `main` 不会自动发布 Release。
+Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.2.7`；提交到 `main` 不会自动发布 Release。
 
 流量汇总的节点明细同时显示流量倍率、实际用量与计费用量（原“用量”）；上传、下载为节点原始计数。共享额度及自动超限停用按各节点倍率后的用量之和计算，超限后向所有下发节点发送停用配置。
 
 入站详细信息在节点名称旁显示“节点倍率 N×”，倍率以红色加粗大字展示；节点信息每行最多三个，超过自动换行，窄屏自动减少列数。
+
+
+## 管理端客户端服务（0.2.7）
+
+仅 `XUI_ROLE=manager` 注册客户端接口和安装包管理接口。被控端不注册接口、不显示客户端设置或下载区，也不新增客户端数据表；现有被控端无需升级。客户端服务默认开启，可在面板设置 → 面板配置中关闭，独立于网页登录开关。
+
+客户端填写管理端前缀，例如 `https://small32.top:8201/`；有面板路径前缀时填写完整地址，例如 `https://example.com/panel/`。Webservices 在此前缀后拼接 `api/client/v1/`。面板根据浏览器当前登录地址显示服务地址，支持管理员保存外部访问地址用于反向代理。安装包不需要绑定固定管理端。
+
+### 客户端接口约定
+
+| 方法 | 相对地址 | 认证 | 说明 |
+| --- | --- | --- | --- |
+| GET | `api/client/v1/info` | 无 | API 版本、XUI 版本、已配置外部地址和客户端默认值 |
+| POST | `api/client/v1/auth/login` | 端口号和密码 | JSON `{"port":"18888","password":"账号密码"}` |
+| POST | `api/client/v1/auth/refresh` | 刷新令牌 | JSON `{"refreshToken":"..."}`，旋转访问和刷新令牌 |
+| POST | `api/client/v1/auth/logout` | Bearer | 注销当前会话 |
+| GET | `api/client/v1/account` | Bearer | 当前账号账单、状态和订阅配置版本 |
+| GET | `api/client/v1/subscription/clash` | Bearer | 直接返回 Clash/Mihomo YAML，不使用第三方转换器 |
+| GET | `api/client/v1/downloads` | Bearer 或有效面板登录 | 已发布安装包列表 |
+| GET / HEAD | `api/client/v1/downloads/:id` | Bearer 或有效面板登录 | 托管安装包下载或外部分发链接跳转 |
+
+登录响应包含 `accessToken`、`refreshToken`、`tokenType=Bearer`、`expiresAt`、`refreshExpiresAt`。访问令牌有效期 24 小时，刷新令牌有效期 30 天；刷新后旧令牌失效。数据库只保存令牌哈希；账号改密、删除或关闭客户端服务后原登录不能访问接口。停用账号仍可以登录查询账单，不能获取可用订阅。登录失败沿用面板 IP 限流。
+
+客户端请求受保护接口时设置 `Authorization: Bearer <accessToken>`。成功响应为直接 JSON，错误为 `{"error":"原因"}` 和相应 HTTP 状态码（401 登录失效、403 账号不可代理、422 配置不可转换、429 限流）。接口默认禁止缓存，不提供跨站网页登录权限。
+
+`account` 返回 `port`、`remark`、`usedBytes`、`actualUsedBytes`、`totalBytes`、`remainingBytes`、`unlimited`、`expiresAt`、`status`、`canProxy`、`monthlyReset`、`observedAt`、`stale`、`configVersion`、`renewalDays=[14,7,3]`。流量字段单位为字节，时间字段为 Unix 秒；无到期时间返回 `expiresAt=null`，不限量返回 `remainingBytes=null`。用量使用管理端当前计费周期的倍率汇总，包含同端口本地入站及已保留的历史节点计数；`actualUsedBytes` 为原始计数。统计读取缓存，不触发逐节点网络查询。客户端建议每 60 秒刷新；节点数据滞后以 `stale` 标识。
+
+账号状态包含 `active`、`disabled`、`overlimit`、`expired`、`no_nodes`、`invalid_config`。客户端必须按 `canProxy` 决定是否启动代理。到期提醒由客户端根据 `expiresAt` 和 `renewalDays` 执行并按账号、到期时间、档位去重；客户端退出时不提供后台通知。原有管理端超限停用规则保持生效。
+
+订阅从管理端保存的配置生成，只包含当前启用、且被账号选择下发的节点，支持各节点不同协议。节点离线不影响已保存配置生成。支持 Shadowsocks、Trojan、VMess、VLESS、HTTP、SOCKS，以及适用协议的 TCP、WebSocket、gRPC、HTTP/2 和 TLS；暂不转换 Reality、旧 XTLS、KCP、QUIC、TCP HTTP 伪装及不兼容的组合，返回明确错误。订阅提供 `Subscription-Userinfo`（计费用量）、`Profile-Update-Interval` 与 ETag；`configVersion` 是实际订阅内容的 SHA256。
+
+配置默认 `mode: rule`、`ipv6: false`、DNS IPv6 关闭、`tun.enable: false`、`tun.stack: mixed`，配置管理端直连规则、内网直连、中国 IP 直连及其他流量走节点选择组。系统代理、自启、静默启动及用户选择的规则／直连／全局模式由后续客户端实现和保存；订阅更新不应覆盖用户选择。
+
+### 安装包管理及下载
+
+面板设置支持上传 Windows `.exe/.msi/.zip`、macOS `.dmg/.pkg/.zip`、Android `.apk`、iOS `.ipa`，也可保存 TestFlight／App Store 等 HTTP(S) 外部分发链接。可填写平台、架构、版本，独立发布、取消发布或删除。仅管理员允许管理安装包。最大上传大小 1GB，服务端生成存储名并计算 SHA256；目录为 `/etc/xui/client-packages`，数据库记录存于原面板数据库，面板升级不会覆盖这些数据。使用反向代理时其上传限制需允许所需包大小。
+
+管理端入站列表顶部、总用量下方显示已发布安装包和 `xui-clash://connect?server=...` 打开客户端入口；此链接需定制客户端注册协议后才可使用。Android／iOS 下载入口仅负责分发，不代表已构建这两个平台的定制客户端。
+
+托管安装包在单个管理端进程内按登录账号限制一个有效下载流，客户端令牌与该账号面板会话共用下载名额；不同账号可分别下载。拒绝多段 Range，单段 Range 忽略并发送完整文件，永不返回 206；下载完成或连接断开后释放名额。HEAD 仅返回文件信息，不占用下载名额。外部分发链接不受此限制。反向代理须关闭该下载路径的缓存及响应缓冲，防止代理提前取完文件绕开并发限制；多实例部署需另外实现共享下载名额。

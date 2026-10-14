@@ -47,6 +47,41 @@
                                 <setting-list-item type="text" title="面板证书密钥文件路径" desc="填写一个 '/' 开头的绝对路径，重启面板生效" v-model="allSetting.webKeyFile"></setting-list-item>
                                 <setting-list-item type="text" title="面板 url 根路径" desc="必须以 '/' 开头，以 '/' 结尾，重启面板生效" v-model="allSetting.webBasePath"></setting-list-item>
                             </a-list>
+                            {{if eq .role "manager"}}
+                            <a-divider>客户端服务</a-divider>
+                            <a-form style="background:white;padding:16px">
+                                <a-form-item label="允许客户端登录"><a-switch v-model="clientSettings.enabled"></a-switch></a-form-item>
+                                <a-form-item label="客户端服务器地址">
+                                    <a-input v-model.trim="clientSettings.publicUrl" :placeholder="clientServerAddress"></a-input>
+                                    <p>留空时按访问地址自动生成，支持面板路径前缀。反向代理或内外网地址不同可填写外部访问地址。</p>
+                                    <p>当前地址：[[clientServerAddress]]</p>
+                                    <p>Webservices：[[clientServerAddress+'api/client/v1/']]</p>
+                                    <a-button @click="copyClientAddress">复制服务器地址</a-button>
+                                    <a-button @click="clientSettings.publicUrl=clientDefaultAddress">使用当前登录地址</a-button>
+                                    <a-button type="primary" @click="saveClientSettings">保存客户端设置</a-button>
+                                </a-form-item>
+                            </a-form>
+                            <a-divider>客户端安装包</a-divider>
+                            <a-form style="background:white;padding:16px">
+                                <a-form-item label="平台"><a-select v-model="clientPackage.platform" style="width:180px"><a-select-option value="windows">Windows</a-select-option><a-select-option value="macos">macOS</a-select-option><a-select-option value="android">Android</a-select-option><a-select-option value="ios">iOS</a-select-option></a-select></a-form-item>
+                                <a-form-item label="架构"><a-input v-model.trim="clientPackage.arch" placeholder="例如 x64、arm64、universal" style="max-width:300px"></a-input></a-form-item>
+                                <a-form-item label="版本"><a-input v-model.trim="clientPackage.version" style="max-width:300px"></a-input></a-form-item>
+                                <a-form-item label="外部分发链接（可选）"><a-input v-model.trim="clientPackage.externalUrl" placeholder="例如 TestFlight 或 App Store 链接；填写后无需上传文件"></a-input></a-form-item>
+                                <a-form-item v-if="!clientPackage.externalUrl" label="安装包（最大 1GB）"><input ref="clientPackageFile" type="file" accept=".exe,.msi,.zip,.dmg,.pkg,.apk,.ipa"></a-form-item>
+                                <a-form-item label="立即发布"><a-switch v-model="clientPackage.published"></a-switch></a-form-item>
+                                <a-button type="primary" :loading="clientUploading" @click="uploadClientPackage">上传 / 添加</a-button>
+                                <p>托管安装包仅允许每个登录账号一个下载流，不支持分段下载。外部分发链接的下载规则由目标平台决定。</p>
+                            </a-form>
+                            <a-table :data-source="clientPackages" row-key="id" :pagination="false" :scroll="{x:900}" size="small">
+                                <a-table-column title="平台" data-index="platform"></a-table-column>
+                                <a-table-column title="架构" data-index="arch"></a-table-column>
+                                <a-table-column title="版本" data-index="version"></a-table-column>
+                                <a-table-column title="安装包 / 分发链接"><template slot-scope="text,row">[[row.filename||row.externalUrl]]</template></a-table-column>
+                                <a-table-column title="大小"><template slot-scope="text,row">[[row.size?sizeFormat(row.size):'-']]</template></a-table-column>
+                                <a-table-column title="SHA256"><template slot-scope="text,row"><a-tooltip :title="row.sha256"><span>[[row.sha256?row.sha256.slice(0,12)+'…':'-']]</span></a-tooltip></template></a-table-column>
+                                <a-table-column title="操作"><template slot-scope="text,row"><a-button type="link" @click="publishClientPackage(row)">[[row.published?'取消发布':'发布']]</a-button><a-popconfirm title="确定删除该安装包？" @confirm="deleteClientPackage(row)"><a-button type="link">删除</a-button></a-popconfirm></template></a-table-column>
+                            </a-table>
+                            {{end}}
                             {{if eq .role "agent"}}
                             <a-divider>被控端连接信息</a-divider>
                             <a-descriptions v-if="connInfo" :column="1" size="small" bordered style="margin-top:8px">
@@ -122,8 +157,38 @@
             connInfo: null,
             showToken: false,
             refreshingFingerprint: false,
+            clientSettings: {enabled:true,publicUrl:''},
+            clientDefaultAddress: new URL('{{ .base_path }}',location.origin).href,
+            clientPackages: [],
+            clientPackage: {platform:'windows',arch:'x64',version:'',externalUrl:'',published:true},
+            clientUploading: false,
+        },
+        computed: {
+            clientServerAddress() { return (this.clientSettings.publicUrl||this.clientDefaultAddress).replace(/\/+$/,'')+'/'; }
         },
         methods: {
+            async clientAdminRequest(path,body) {
+                const response=await fetch('{{ .base_path }}xui/client/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},body:JSON.stringify(body||{})});
+                const msg=await response.json();if(!msg.success)throw new Error(msg.msg||'操作失败');return msg;
+            },
+            async loadClientSettings() {
+                try {this.clientSettings=(await this.clientAdminRequest('settings')).obj;await this.loadClientPackages();}catch(e){this.$message.error(e.message);}
+            },
+            async loadClientPackages() {this.clientPackages=(await this.clientAdminRequest('packages')).obj||[];},
+            async saveClientSettings() {
+                try {await this.clientAdminRequest('settings/update',this.clientSettings);this.$message.success('客户端设置已保存');}catch(e){this.$message.error(e.message);}
+            },
+            async copyClientAddress() {
+                try {await navigator.clipboard.writeText(this.clientServerAddress);this.$message.success('服务器地址已复制');}catch(e){this.$message.error('请手动复制当前服务器地址');}
+            },
+            async uploadClientPackage() {
+                const body=new FormData();for(const [key,value] of Object.entries(this.clientPackage))body.append(key,String(value));
+                if(!this.clientPackage.externalUrl){const file=this.$refs.clientPackageFile.files[0];if(!file){this.$message.error('请选择安装包');return;}body.append('file',file);}
+                this.clientUploading=true;
+                try {const response=await fetch('{{ .base_path }}xui/client/packages/upload',{method:'POST',credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'},body});const msg=await response.json();if(!msg.success)throw new Error(msg.msg||'上传失败');await this.loadClientPackages();if(this.$refs.clientPackageFile)this.$refs.clientPackageFile.value='';this.$message.success('安装包已保存');}catch(e){this.$message.error(e.message);}finally{this.clientUploading=false;}
+            },
+            async publishClientPackage(row) {try{await this.clientAdminRequest('packages/'+row.id+'/publish',{published:!row.published});await this.loadClientPackages();}catch(e){this.$message.error(e.message);}},
+            async deleteClientPackage(row) {try{await this.clientAdminRequest('packages/'+row.id+'/delete');await this.loadClientPackages();}catch(e){this.$message.error(e.message);}},
             loading(spinning = true) {
                 this.spinning = spinning;
             },
@@ -196,6 +261,7 @@
         async mounted() {
             await this.getAllSetting();
             await this.loadConnInfo();
+            {{if eq .role "manager"}}await this.loadClientSettings();{{end}}
             while (true) {
                 await PromiseUtil.sleep(1000);
                 this.saveBtnDisable = this.oldAllSetting.equals(this.allSetting);

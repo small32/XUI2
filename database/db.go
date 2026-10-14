@@ -132,7 +132,13 @@ func initTrafficSnapshot() error {
 }
 
 func initManagement() error {
-	return db.AutoMigrate(&model.ManagedNode{}, &model.NodeTraffic{}, &model.SyncTask{}, &model.AgentOperation{}, &model.AgentMonthlySnapshot{}, &model.NodeTrafficSnapshot{}, &model.HostNetworkMonth{})
+	if err := db.AutoMigrate(&model.ManagedNode{}, &model.NodeTraffic{}, &model.SyncTask{}, &model.AgentOperation{}, &model.AgentMonthlySnapshot{}, &model.NodeTrafficSnapshot{}, &model.HostNetworkMonth{}); err != nil {
+		return err
+	}
+	if config.Role() == "manager" {
+		return db.AutoMigrate(&model.ClientSession{}, &model.ClientPackage{})
+	}
+	return nil
 }
 
 func InitDB(dbPath string) error {

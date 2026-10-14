@@ -11,6 +11,7 @@
     .ant-col-sm-24 {
         margin-top: 10px;
     }
+    .client-downloads { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -38,6 +39,20 @@
                                 入站数量：
                                 <a-tag color="green">[[ dbInbounds.length ]]</a-tag>
                             </a-col>
+                            {{if eq .role "manager"}}
+                            <a-col :xs="24" :sm="24" :lg="12">
+                                <div class="client-downloads">
+                                    <span>客户端下载：</span>
+                                    <span v-if="!clientDownloads.length" style="color:#888">暂无已发布安装包</span>
+                                    <a v-for="pkg in clientDownloads" :key="pkg.id" :href="pkg.url"
+                                       :target="pkg.hosted?'_self':'_blank'" rel="noopener"
+                                       :title="pkg.version+(pkg.size?' · '+sizeFormat(pkg.size):'')">
+                                        [[ clientPlatformName(pkg.platform) ]] [[ pkg.arch ]]
+                                    </a>
+                                    <a :href="clientLaunchUrl">打开客户端</a>
+                                </div>
+                            </a-col>
+                            {{end}}
                         </a-row>
                     </a-card>
                 </transition>
@@ -196,6 +211,8 @@
         el: '#app',
         data: {
             siderDrawer,
+            clientDownloads: [],
+            clientLaunchUrl: 'xui-clash://connect?server='+encodeURIComponent(new URL('{{ .base_path }}',location.origin).href),
             restricted,
             role,
             canEditInbound: {{ .canEditInbound }},
@@ -213,6 +230,17 @@
             subscriptionNodes: '',
         },
         methods: {
+            clientPlatformName(platform) {
+                return {windows:'Windows',macos:'macOS',android:'Android',ios:'iOS'}[platform]||platform;
+            },
+            async loadClientDownloads() {
+                const [rows,info]=await Promise.all([
+                    HttpUtil.get('api/client/v1/downloads'),
+                    HttpUtil.get('api/client/v1/info')
+                ]);
+                if(Array.isArray(rows))this.clientDownloads=rows;
+                if(info.serverAddress)this.clientLaunchUrl='xui-clash://connect?server='+encodeURIComponent(info.serverAddress);
+            },
             loading(spinning=true) {
                 this.spinning = spinning;
             },
@@ -465,6 +493,7 @@
         },
         mounted() {
             this.getDBInbounds();
+            {{if eq .role "manager"}}this.loadClientDownloads().catch(e=>console.error(e));{{end}}
         },
         beforeDestroy() {
             if (this.clashSubscriptionClipboard) this.clashSubscriptionClipboard.destroy();

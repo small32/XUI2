@@ -210,6 +210,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	s.index = controller.NewIndexController(g)
 	s.server = controller.NewServerController(g)
 	s.xui = controller.NewXUIController(g)
+	controller.RegisterClientAPI(g)
 	if config.Role() == "agent" {
 		controller.RegisterAgentAPI(engine)
 	}

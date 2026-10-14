@@ -37,6 +37,7 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	a.serverManagementController = NewServerManagementController(g)
 	a.inboundController = NewInboundController(g, a.serverManagementController)
 	a.settingController = NewSettingController(g)
+	RegisterClientAdmin(g)
 }
 
 // checkRestricted 受限登录（入站端口号登录）仅可访问入站列表页、入站列表数据、其订阅数据，
