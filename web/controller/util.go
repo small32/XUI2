@@ -141,7 +141,8 @@ func findI18nParamNames(key string) []string {
 
 func getContext(h gin.H) gin.H {
 	a := gin.H{
-		"cur_ver": config.GetVersion(),
+		"cur_ver":       config.GetVersion(),
+		"panel_version": config.GetVersion(),
 	}
 	if h != nil {
 		for key, value := range h {
