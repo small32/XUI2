@@ -16,25 +16,7 @@
     }
 
     function cleanHTML(value) {
-        if (!window.DOMPurify) return escapeText(value);
-        const html = DOMPurify.sanitize(String(value || ''), {
-            USE_PROFILES: {html:true},
-            FORBID_TAGS: ['script','style','form','input','button','select','option','textarea','iframe','object','embed','svg','math','link','meta','base'],
-            FORBID_ATTR: ['srcset','formaction','srcdoc']
-        });
-        const container = document.createElement('div');
-        container.innerHTML = html;
-        container.querySelectorAll('img').forEach(image => {
-            const src = image.getAttribute('src') || '';
-            if (!httpURL(src) && !/^data:image\/(?:png|jpeg|jpg|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(src)) image.remove();
-        });
-        container.querySelectorAll('a').forEach(link => {
-            const href = httpURL(link.getAttribute('href') || '');
-            if (href) link.setAttribute('href', href);
-            else link.removeAttribute('href');
-            link.setAttribute('rel', 'noopener noreferrer');
-        });
-        return container.innerHTML;
+        return window.ClientGuideHTML ? ClientGuideHTML.sanitize(value) : escapeText(value);
     }
 
     Vue.component('client-guide-editor', {
@@ -79,9 +61,9 @@
                 </div>
                 <div v-show="mode==='visual'" ref="editor" class="client-guide-editor-body client-guide-content" :contenteditable="disabled||imageBusy?'false':'true'" role="textbox" aria-label="使用说明正文" aria-multiline="true" data-placeholder="在这里编写使用说明，可插入图片、链接和格式化文字……" @input="visualInput" @keyup="rememberSelection" @mouseup="rememberSelection" @blur="rememberSelection" @paste="pasteContent" @drop="dropContent" @dragover.prevent></div>
                 <textarea v-if="mode==='source'" class="client-guide-source" :value="sourceHTML" :disabled="disabled" aria-label="使用说明 HTML 源码" spellcheck="false" @input="sourceInput($event.target.value)"></textarea>
-                <div v-if="mode==='preview'" class="client-guide-preview client-guide-content" v-html="previewHTML"></div>
+                <div v-if="mode==='preview'" class="client-guide-preview client-guide-content" @click="handleAnchorClick" v-html="previewHTML"></div>
                 <a-modal v-model="linkDialog" title="插入链接" :footer="null" :width="460">
-                    <div class="client-guide-insert-row"><label>链接地址（HTTP / HTTPS）</label><a-input v-model.trim="linkURL" placeholder="https://example.com/" @pressEnter="insertLink"></a-input></div>
+                    <div class="client-guide-insert-row"><label>链接地址（HTTP / HTTPS 或文内锚点）</label><a-input v-model.trim="linkURL" placeholder="https://example.com/ 或 #install" @pressEnter="insertLink"></a-input></div>
                     <div class="client-guide-insert-row"><label>显示文字</label><a-input v-model="linkText" placeholder="留空使用所选文字或链接地址"></a-input></div>
                     <a-button type="primary" @click="insertLink">插入链接</a-button>
                 </a-modal>
@@ -112,6 +94,9 @@
             this.savedSelection = null;
         },
         methods: {
+            handleAnchorClick(event) {
+                ClientGuideHTML.handleAnchorClick(event, event.currentTarget);
+            },
             rememberSelection() {
                 const editor = this.$refs.editor;
                 const selection = window.getSelection();
@@ -176,10 +161,11 @@
                 this.linkDialog = true;
             },
             insertLink() {
-                const url = httpURL(this.linkURL);
-                if (!url) { this.$message.error('请输入完整的 HTTP 或 HTTPS 链接'); return; }
+                const url = ClientGuideHTML.linkURL(this.linkURL);
+                if (!url) { this.$message.error('请输入 HTTP / HTTPS 链接或有效的 #文内锚点'); return; }
+                const target = url.startsWith('#') ? '' : ' target="_blank" rel="noopener noreferrer"';
                 this.linkDialog = false;
-                this.$nextTick(() => this.insertHTML('<a href="' + escapeText(url) + '" target="_blank" rel="noopener noreferrer">' + escapeText(this.linkText || url) + '</a>'));
+                this.$nextTick(() => this.insertHTML('<a href="' + escapeText(url) + '"' + target + '>' + escapeText(this.linkText || url) + '</a>'));
             },
             openImageDialog() {
                 this.rememberSelection();

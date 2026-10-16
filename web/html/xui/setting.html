@@ -159,6 +159,7 @@
                                     <client-guide-editor v-model="clientGuide.html" :disabled="clientGuideLoading||clientGuideSaving" @busy="clientGuideBusy=$event"></client-guide-editor>
                                 </a-spin>
                                 <p style="margin-top:12px">图片支持 PNG、JPG、GIF、WebP，每张最大 5MiB；说明整体最大 20MiB。</p>
+                                <p>文内跳转示例：在 HTML 源码中设置 <code>&lt;h2 id="install"&gt;安装&lt;/h2&gt;</code>，再插入 <code>#install</code> 链接。锚点名称可用中英文、数字、点、下划线、冒号或减号，最长 128 个字符；在预览或阅读窗口点击跳转。</p>
                                 <p v-if="clientGuide.updatedAt">最近保存：[[new Date(clientGuide.updatedAt*1000).toLocaleString()]]</p>
                                 <a-button type="primary" :loading="clientGuideSaving" :disabled="clientGuideLoading||clientGuideBusy" @click="saveClientGuide">保存使用说明</a-button>
                             </div>
@@ -179,6 +180,7 @@
 {{template "js" .}}
 {{if eq .role "manager"}}
 <script src="{{ .base_path }}assets/dompurify/purify.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/client-guide-html.js?{{ .cur_ver }}"></script>
 <script src="{{ .base_path }}assets/js/client-guide-editor.js?{{ .cur_ver }}"></script>
 {{end}}
 {{template "component/setting"}}

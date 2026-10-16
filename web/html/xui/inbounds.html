@@ -15,6 +15,8 @@
     .client-downloads { display:flex; align-items:center; gap:8px; }
     .client-download-item { padding:12px 0; border-bottom:1px solid #f0f0f0; overflow-wrap:anywhere; }
     .client-download-item:last-child { border-bottom:0; }
+    .client-download-header { display:flex; align-items:baseline; flex-wrap:wrap; column-gap:12px; row-gap:4px; }
+    .client-download-actions { display:inline-flex; gap:12px; white-space:nowrap; }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -138,7 +140,7 @@
             <div style="min-height:70px">
                 <a-alert v-if="clientGuideError" type="error" :message="clientGuideError" show-icon></a-alert>
                 <p v-else-if="!clientGuideLoading&&!clientGuideHTML" style="color:#888">管理员暂未设置使用说明</p>
-                <div v-else class="client-guide-content" v-html="clientGuideHTML"></div>
+                <div v-else class="client-guide-content" @click="handleGuideAnchorClick" v-html="clientGuideHTML"></div>
             </div>
         </a-spin>
     </a-modal>
@@ -149,12 +151,16 @@
                 <a-alert v-if="clientDownloadsError" type="error" :message="clientDownloadsError" show-icon></a-alert>
                 <p v-else-if="!clientDownloadsLoading&&!clientDownloads.length" style="color:#888">暂无可下载的安装包</p>
                 <div v-for="pkg in clientDownloads" :key="pkg.id" class="client-download-item">
-                    <div><strong>[[ clientPlatformName(pkg.platform) ]] [[ pkg.arch ]]</strong><span v-if="pkg.version"> · [[ pkg.version ]]</span></div>
+                    <div class="client-download-header">
+                        <span><strong>[[ clientPlatformName(pkg.platform) ]] [[ pkg.arch ]]</strong><span v-if="pkg.version"> · [[ pkg.version ]]</span></span>
+                        <span class="client-download-actions">
+                            <a :href="pkg.url" @click="downloadClient($event,pkg)"
+                               :target="pkg.hosted||pkg.resolveUrl?'_self':'_blank'" rel="noopener">下载</a>
+                            <a v-if="pkg.relayUrl&&!pkg.hosted" :href="pkg.relayUrl"
+                               title="服务器中转下载，最多5个并发线程">备用中转</a>
+                        </span>
+                    </div>
                     <div style="color:#888;margin:4px 0">[[ pkg.filename ]]<span v-if="pkg.size"> · [[ sizeFormat(pkg.size) ]]</span></div>
-                    <a :href="pkg.url" @click="downloadClient($event,pkg)"
-                       :target="pkg.hosted||pkg.resolveUrl?'_self':'_blank'" rel="noopener">下载</a>
-                    <a v-if="pkg.relayUrl&&!pkg.hosted" :href="pkg.relayUrl" style="margin-left:12px"
-                       title="服务器中转下载，最多5个并发线程">备用中转</a>
                 </div>
             </div>
         </a-spin>
@@ -181,7 +187,8 @@
     </a-modal>
 </a-layout>
 {{template "js" .}}
-{{if eq .role "manager"}}<script src="{{ .base_path }}assets/dompurify/purify.min.js"></script>{{end}}
+{{if eq .role "manager"}}<script src="{{ .base_path }}assets/dompurify/purify.min.js"></script>
+<script src="{{ .base_path }}assets/js/client-guide-html.js?{{ .cur_ver }}"></script>{{end}}
 <script>
 
     const restricted = {{ .restricted }};
@@ -301,9 +308,12 @@
                     const response=await fetch('{{ .base_path }}api/client/v1/guide',{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});
                     const guide=await response.json();
                     if(!response.ok||typeof guide.html!=='string')throw new Error(guide.error||guide.msg||'读取使用说明失败，请稍后重试');
-                    this.clientGuideHTML=DOMPurify.sanitize(guide.html,{USE_PROFILES:{html:true},FORBID_TAGS:['script','style','iframe','object','embed','form','svg','math'],FORBID_ATTR:['id','name','srcset']});
+                    this.clientGuideHTML=ClientGuideHTML.sanitize(guide.html);
                 }catch(e){this.clientGuideError=e.message||'读取使用说明失败，请稍后重试';}
                 finally{this.clientGuideLoading=false;}
+            },
+            handleGuideAnchorClick(event) {
+                ClientGuideHTML.handleAnchorClick(event,event.currentTarget);
             },
             loading(spinning=true) {
                 this.spinning = spinning;

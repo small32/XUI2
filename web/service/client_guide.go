@@ -14,6 +14,7 @@ import (
 	"xui/database/model"
 
 	"github.com/microcosm-cc/bluemonday"
+	"golang.org/x/net/html"
 )
 
 const ClientGuideMaxSize = 20 * 1024 * 1024
@@ -25,6 +26,7 @@ type ClientGuide struct {
 }
 
 var clientGuideMu sync.Mutex
+var clientGuideAnchorName = regexp.MustCompile(`^[\p{L}\p{N}_.:-]{1,128}$`)
 var clientGuidePolicy = newClientGuidePolicy()
 
 func newClientGuidePolicy() *bluemonday.Policy {
@@ -35,9 +37,10 @@ func newClientGuidePolicy() *bluemonday.Policy {
 	p.AllowLists()
 	p.AllowTables()
 	p.AllowAttrs("title").Matching(bluemonday.Paragraph).Globally()
+	p.AllowAttrs("data-guide-anchor").Matching(clientGuideAnchorName).Globally()
 	p.AllowAttrs("align").Matching(bluemonday.CellAlign).OnElements("p", "div", "h1", "h2", "h3", "h4", "h5", "h6")
-	p.AllowAttrs("href").Matching(regexp.MustCompile(`(?i)^https?://`)).OnElements("a")
-	p.AllowAttrs("src").OnElements("img")
+	p.AllowAttrs("href").Matching(regexp.MustCompile(`(?i)^(https?://|#[\p{L}\p{N}_.:%-]+$)`)).OnElements("a")
+	p.AllowAttrs("src").Matching(regexp.MustCompile(`(?i)^(https?://|data:)`)).OnElements("img")
 	p.AllowAttrs("alt").Matching(bluemonday.Paragraph).OnElements("img")
 	p.AllowAttrs("width", "height").Matching(bluemonday.NumberOrPercent).OnElements("img")
 	// Older browser editing commands can emit font elements instead of span styles.
@@ -45,7 +48,9 @@ func newClientGuidePolicy() *bluemonday.Policy {
 	p.AllowAttrs("color").Matching(regexp.MustCompile(`(?i)^(#[0-9a-f]{3,8}|[a-z]{1,30})$`)).OnElements("font")
 	p.AllowAttrs("size").Matching(regexp.MustCompile(`^[+-]?[1-7]$`)).OnElements("font")
 	p.RequireParseableURLs(true)
-	p.AllowRelativeURLs(false)
+	// Fragment links are local to the guide; the href/src allowlists still reject
+	// other relative URLs and protocol-relative URLs.
+	p.AllowRelativeURLs(true)
 	p.AllowURLSchemes("http", "https")
 	// The library's image helper also permits SVG; this guide only accepts raster data.
 	p.AllowURLSchemeWithCustomPolicy("data", clientGuideRasterDataURL)
@@ -63,6 +68,55 @@ func newClientGuidePolicy() *bluemonday.Policy {
 	p.AllowStyles("width", "height", "max-width", "max-height").OnElements("img", "table")
 	p.AllowStyles("border", "border-collapse", "border-spacing", "border-color", "border-style", "border-width").OnElements("table", "td", "th")
 	return p
+}
+
+func sanitizeClientGuide(raw string) string {
+	// Keep document anchors out of the panel's global ID/name namespace. The
+	// guide renderer resolves these private markers within its own container.
+	tokens := html.NewTokenizer(strings.NewReader(raw))
+	var normalized strings.Builder
+	for {
+		kind := tokens.Next()
+		if kind == html.ErrorToken {
+			break
+		}
+		if kind != html.StartTagToken && kind != html.SelfClosingTagToken {
+			normalized.Write(tokens.Raw())
+			continue
+		}
+		token := tokens.Token()
+		attrs := token.Attr[:0]
+		var anchor, elementID, legacyName string
+		for _, attr := range token.Attr {
+			switch attr.Key {
+			case "id":
+				if clientGuideAnchorName.MatchString(attr.Val) {
+					elementID = attr.Val
+				}
+			case "name":
+				if token.Data == "a" && clientGuideAnchorName.MatchString(attr.Val) {
+					legacyName = attr.Val
+				}
+			case "data-guide-anchor":
+				if clientGuideAnchorName.MatchString(attr.Val) {
+					anchor = attr.Val
+				}
+			default:
+				attrs = append(attrs, attr)
+			}
+		}
+		if elementID != "" {
+			anchor = elementID
+		} else if legacyName != "" {
+			anchor = legacyName
+		}
+		if anchor != "" {
+			attrs = append(attrs, html.Attribute{Key: "data-guide-anchor", Val: anchor})
+		}
+		token.Attr = attrs
+		normalized.WriteString(token.String())
+	}
+	return clientGuidePolicy.Sanitize(normalized.String())
 }
 
 func clientGuideRasterDataURL(u *url.URL) bool {
@@ -113,7 +167,7 @@ func (s *ClientService) Guide() (*ClientGuide, error) {
 		return nil, errors.New("使用说明内容超过 20MB")
 	}
 	// Sanitize reads as well, including records restored from an older backup.
-	guide.HTML = clientGuidePolicy.Sanitize(guide.HTML)
+	guide.HTML = sanitizeClientGuide(guide.HTML)
 	if len(guide.HTML) > ClientGuideMaxSize {
 		return nil, errors.New("使用说明内容超过 20MB")
 	}
@@ -124,13 +178,13 @@ func (s *ClientService) SaveGuide(raw string) (*ClientGuide, error) {
 	if len(raw) > ClientGuideMaxSize {
 		return nil, errors.New("使用说明内容不能超过 20MB")
 	}
-	html := clientGuidePolicy.Sanitize(strings.TrimSpace(raw))
-	if len(html) > ClientGuideMaxSize {
+	clean := sanitizeClientGuide(strings.TrimSpace(raw))
+	if len(clean) > ClientGuideMaxSize {
 		return nil, errors.New("使用说明内容不能超过 20MB")
 	}
 	clientGuideMu.Lock()
 	defer clientGuideMu.Unlock()
-	guide := &ClientGuide{HTML: html, UpdatedAt: time.Now().Unix()}
+	guide := &ClientGuide{HTML: clean, UpdatedAt: time.Now().Unix()}
 	data, err := json.Marshal(guide)
 	if err != nil {
 		return nil, err

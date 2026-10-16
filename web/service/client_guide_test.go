@@ -84,6 +84,61 @@ func TestClientGuideStripsStoredXSSAndUnsafeURLs(t *testing.T) {
 	}
 }
 
+func TestClientGuidePreservesDocumentAnchors(t *testing.T) {
+	clientTestDB(t)
+	s := new(ClientService)
+	raw := `<p><a href="#install" target="_blank">安装步骤</a> <a href="#%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98">常见问题</a> <a href="#legacy">旧式锚点</a></p>` +
+		`<h2 id="install">安装步骤</h2><h2 id="常见问题">常见问题</h2><a name="legacy"></a>` +
+		`<p data-guide-anchor="existing">已保存的锚点</p><h3 id="app">同名标记</h3>` +
+		`<a href="https://example.com/manual?a=1&amp;b=2">外部教程</a>`
+	guide, err := s.SaveGuide(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`href="#install"`, `href="#%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98"`, `href="#legacy"`, `data-guide-anchor="install"`, `data-guide-anchor="常见问题"`, `data-guide-anchor="legacy"`, `data-guide-anchor="existing"`, `data-guide-anchor="app"`, `href="https://example.com/manual?a=1&amp;b=2"`} {
+		if !strings.Contains(guide.HTML, expected) {
+			t.Errorf("document anchor lost %q: %s", expected, guide.HTML)
+		}
+	}
+	for _, forbidden := range []string{` id=`, ` name=`} {
+		if strings.Contains(guide.HTML, forbidden) {
+			t.Errorf("guide anchor leaked into panel DOM namespace: %s", guide.HTML)
+		}
+	}
+	loaded, err := new(ClientService).Guide()
+	if err != nil || loaded.HTML != guide.HTML {
+		t.Fatalf("anchors changed when reading the saved guide: %v", err)
+	}
+	// Raw HTML restored from a backup uses the same anchor normalization.
+	restored, _ := json.Marshal(&ClientGuide{HTML: raw, UpdatedAt: 123})
+	if err := database.GetDB().Model(&model.Setting{}).Where("key = ?", clientGuideSettingKey).Update("value", string(restored)).Error; err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = s.Guide()
+	if err != nil || loaded.HTML != guide.HTML || loaded.UpdatedAt != 123 {
+		t.Fatalf("restored document anchors were not normalized: %v", err)
+	}
+}
+
+func TestClientGuideAnchorsDoNotAllowOtherRelativeURLs(t *testing.T) {
+	raw := `<a href="//bad.example/path">protocol-relative</a><a href="/xui/settings">absolute path</a>` +
+		`<a href="../settings">relative path</a><a href="?action=delete">query</a><a href="javascript:alert(1)">script</a>` +
+		`<img src="//bad.example/x.png"><img src="/xui/settings"><img src="#install"><img src="data:text/html;base64,PHNjcmlwdD4=">` +
+		`<h2 id="bad name" data-guide-anchor="bad name">invalid</h2><a name="bad/name"></a>` +
+		`<a href="#install" onclick="alert(1)">valid</a><h2 id="install">标题</h2><img src="https://example.com/image.png">`
+	clean := sanitizeClientGuide(raw)
+	for _, forbidden := range []string{`href="//`, `href="/`, `href="..`, `href="?`, "javascript:", "onclick", `src="//`, `src="/`, `src="#`, "data:text/html", `data-guide-anchor="bad`, ` id=`, ` name=`} {
+		if strings.Contains(clean, forbidden) {
+			t.Errorf("unsafe attribute survived %q: %s", forbidden, clean)
+		}
+	}
+	for _, expected := range []string{`href="#install"`, `data-guide-anchor="install"`, `src="https://example.com/image.png"`} {
+		if !strings.Contains(clean, expected) {
+			t.Errorf("safe content lost %q: %s", expected, clean)
+		}
+	}
+}
+
 func TestClientGuideEmptyLimitsAndIndependentSettings(t *testing.T) {
 	clientTestDB(t)
 	s := new(ClientService)
