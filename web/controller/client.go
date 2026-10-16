@@ -6,8 +6,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"xui/config"
@@ -19,8 +17,7 @@ import (
 
 type ClientController struct {
 	BaseController
-	service    service.ClientService
-	packageDir string
+	service service.ClientService
 }
 
 func RegisterClientAPI(g *gin.RouterGroup) {
@@ -41,8 +38,6 @@ func RegisterClientAPI(g *gin.RouterGroup) {
 	api.POST("/auth/login", a.login)
 	api.POST("/auth/refresh", a.refresh)
 	api.GET("/downloads", a.downloads)
-	api.GET("/downloads/:id", a.download)
-	api.HEAD("/downloads/:id", a.download)
 	api.GET("/release-downloads/:assetID", a.downloadReleaseAsset)
 	api.HEAD("/release-downloads/:assetID", a.downloadReleaseAsset)
 	api.GET("/release-links/:assetID", a.releaseAssetLink)
@@ -62,10 +57,11 @@ func RegisterClientAdmin(g *gin.RouterGroup) {
 	g.POST("/settings", a.settings)
 	g.POST("/settings/update", a.saveSettings)
 	g.POST("/github-release", a.gitHubRelease)
-	g.POST("/packages", a.packages)
-	g.POST("/packages/upload", a.upload)
-	g.POST("/packages/:id/publish", a.publish)
-	g.POST("/packages/:id/delete", a.deletePackage)
+	g.POST("/github/connect", a.connectGitHubApp)
+	g.POST("/github/status", a.gitHubAppStatus)
+	g.POST("/github/disconnect", a.disconnectGitHubApp)
+	g.GET("/github/callback", a.gitHubAppCallback)
+	g.GET("/github/installed", a.gitHubAppInstalled)
 }
 func clientError(c *gin.Context, status int, err error) {
 	c.AbortWithStatusJSON(status, gin.H{"error": err.Error()})
@@ -196,63 +192,63 @@ func (a *ClientController) gitHubRelease(c *gin.Context) {
 	value, err := a.service.GitHubRelease(c.Request.Context(), input.Refresh)
 	jsonObj(c, value, err)
 }
-func (a *ClientController) packages(c *gin.Context) {
-	v, err := a.service.Packages(false)
-	jsonObj(c, v, err)
-}
-func (a *ClientController) upload(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.ClientPackageMaxSize+1024*1024)
-	if err := c.Request.ParseMultipartForm(8 * 1024 * 1024); err != nil {
-		jsonMsg(c, "上传安装包", err)
+func (a *ClientController) connectGitHubApp(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	var input struct {
+		BaseURL string `json:"baseUrl"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil && err != io.EOF {
+		jsonMsg(c, "连接 GitHub App", fmt.Errorf("连接参数格式无效"))
 		return
 	}
-	defer c.Request.MultipartForm.RemoveAll()
-	p := model.ClientPackage{Platform: c.PostForm("platform"), Arch: c.PostForm("arch"), Version: c.PostForm("version"), ExternalURL: strings.TrimSpace(c.PostForm("externalUrl")), Published: c.PostForm("published") == "true"}
-	var reader io.Reader
-	if p.ExternalURL == "" {
-		file, header, err := c.Request.FormFile("file")
+	baseURL := a.requestBaseURL(c)
+	if strings.TrimSpace(input.BaseURL) != "" {
+		value, err := service.ValidateClientURL(input.BaseURL)
 		if err != nil {
-			jsonMsg(c, "上传安装包", err)
+			jsonMsg(c, "连接 GitHub App", err)
 			return
 		}
-		defer file.Close()
-		p.Filename = header.Filename
-		reader = file
+		baseURL = value
 	}
-	jsonMsg(c, "上传安装包", a.service.StorePackage(&p, reader, a.packageRoot()))
+	value, err := a.service.BeginGitHubApp(c.Request.Context(), session.GetLoginUser(c).Id, baseURL)
+	jsonObj(c, value, err)
 }
-func clientPackageID(c *gin.Context) (int, error) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil || id < 1 {
-		return 0, fmt.Errorf("安装包编号无效")
+func (a *ClientController) gitHubAppStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	value, err := a.service.GitHubAppStatus()
+	jsonObj(c, value, err)
+}
+func (a *ClientController) disconnectGitHubApp(c *gin.Context) {
+	jsonMsg(c, "断开本机 GitHub App 连接", a.service.DisconnectGitHubApp())
+}
+func (a *ClientController) gitHubAppCallback(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	state, code := strings.TrimSpace(c.Query("state")), strings.TrimSpace(c.Query("code"))
+	if state == "" || code == "" || c.Query("error") != "" {
+		c.String(http.StatusBadRequest, "GitHub 授权未完成或缺少授权参数，请返回面板设置重新连接。")
+		return
 	}
-	return id, nil
-}
-func (a *ClientController) publish(c *gin.Context) {
-	id, err := clientPackageID(c)
+	installationURL, err := a.service.CompleteGitHubAppRegistration(c.Request.Context(), session.GetLoginUser(c).Id, state, code)
 	if err != nil {
-		jsonMsg(c, "发布安装包", err)
+		c.String(http.StatusBadRequest, "GitHub 连接失败：%s。请返回面板设置重新连接。", err.Error())
 		return
 	}
-	var input struct {
-		Published bool `json:"published"`
-	}
-	if err := c.ShouldBindJSON(&input); err != nil {
-		jsonMsg(c, "发布安装包", err)
-		return
-	}
-	r := database.GetDB().Model(&model.ClientPackage{}).Where("id = ?", id).Update("published", input.Published)
-	if r.Error == nil && r.RowsAffected == 0 {
-		r.Error = fmt.Errorf("安装包不存在")
-	}
-	jsonMsg(c, "发布安装包", r.Error)
+	c.Redirect(http.StatusFound, installationURL)
 }
-func (a *ClientController) deletePackage(c *gin.Context) {
-	id, err := clientPackageID(c)
-	if err == nil {
-		err = a.service.DeletePackage(id, a.packageRoot())
+func (a *ClientController) gitHubAppInstalled(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	state := strings.TrimSpace(c.Query("state"))
+	if state == "" {
+		c.String(http.StatusBadRequest, "缺少 GitHub 安装授权状态，请返回面板设置重新连接。")
+		return
 	}
-	jsonMsg(c, "删除安装包", err)
+	if err := a.service.CompleteGitHubAppInstallation(c.Request.Context(), session.GetLoginUser(c).Id, state); err != nil {
+		c.String(http.StatusBadRequest, "GitHub 安装连接未完成：%s。请返回面板设置重新连接。", err.Error())
+		return
+	}
+	c.Redirect(http.StatusFound, c.GetString("base_path")+"xui/setting?github=connected")
 }
 func (a *ClientController) downloadIdentity(c *gin.Context) string {
 	if c.GetHeader("Authorization") != "" {
@@ -275,19 +271,7 @@ func (a *ClientController) downloads(c *gin.Context) {
 	if a.downloadIdentity(c) == "" {
 		return
 	}
-	rows, err := a.service.Packages(true)
-	if err != nil {
-		clientError(c, 500, err)
-		return
-	}
 	out := []gin.H{}
-	for _, p := range rows {
-		url := c.GetString("base_path") + "api/client/v1/downloads/" + strconv.Itoa(p.Id)
-		if p.ExternalURL != "" {
-			url = p.ExternalURL
-		}
-		out = append(out, gin.H{"id": p.Id, "platform": p.Platform, "arch": p.Arch, "version": p.Version, "filename": p.Filename, "size": p.Size, "sha256": p.SHA256, "url": url, "hosted": p.ExternalURL == ""})
-	}
 	release, err := a.service.GitHubRelease(c.Request.Context(), false)
 	if err != nil {
 		c.Header("X-Client-Release-Error", "unavailable")
@@ -302,6 +286,16 @@ func (a *ClientController) downloads(c *gin.Context) {
 			clientError(c, 500, err)
 			return
 		}
+		authenticated := false
+		if !relay {
+			token, err := a.service.GitHubAccessToken(c.Request.Context(), cfg)
+			if err != nil {
+				c.Header("X-Client-Release-Error", "unavailable")
+				c.JSON(200, out)
+				return
+			}
+			authenticated = token != ""
+		}
 		for _, asset := range release.Assets {
 			assetID := strconv.FormatInt(asset.ID, 10)
 			relayURL := c.GetString("base_path") + "api/client/v1/release-downloads/" + assetID + "?relay=1"
@@ -309,7 +303,7 @@ func (a *ClientController) downloads(c *gin.Context) {
 			resolveURL := ""
 			if relay {
 				link = relayURL
-			} else if cfg.GitHubTokenConfigured {
+			} else if authenticated {
 				resolveURL = c.GetString("base_path") + "api/client/v1/release-links/" + assetID
 			}
 			out = append(out, gin.H{"id": "github-" + assetID, "platform": asset.Platform, "arch": asset.Arch, "version": release.TagName, "filename": asset.Name, "size": asset.Size, "sha256": asset.SHA256, "url": link, "resolveUrl": resolveURL, "relayUrl": relayURL, "hosted": relay, "source": "github"})
@@ -317,74 +311,19 @@ func (a *ClientController) downloads(c *gin.Context) {
 	}
 	c.JSON(200, out)
 }
-func (a *ClientController) download(c *gin.Context) {
-	identity := a.downloadIdentity(c)
-	if identity == "" {
-		return
-	}
-	id, err := clientPackageID(c)
-	if err != nil {
-		clientError(c, 400, err)
-		return
-	}
-	var p model.ClientPackage
-	if err := database.GetDB().Where("id = ? AND published = ?", id, true).First(&p).Error; err != nil {
-		clientError(c, 404, fmt.Errorf("安装包不存在或未发布"))
-		return
-	}
-	if p.ExternalURL != "" {
-		c.Redirect(302, p.ExternalURL)
-		return
-	}
-	if strings.Contains(c.GetHeader("Range"), ",") {
-		clientError(c, 416, fmt.Errorf("不支持分段下载"))
-		return
-	}
-	file, err := os.Open(filepath.Join(a.packageRoot(), filepath.Base(p.StorageName)))
-	if err != nil {
-		clientError(c, 404, fmt.Errorf("安装包文件不存在"))
-		return
-	}
-	defer file.Close()
-	if c.Request.Method != http.MethodHead {
-		release, ok := service.AcquireClientDownload(identity)
-		if !ok {
-			clientError(c, 429, fmt.Errorf("此账号已有下载进行中，仅允许单线程下载"))
-			return
-		}
-		defer release()
-	}
-	c.Header("Accept-Ranges", "none")
-	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": p.Filename}))
-	c.Header("Content-Length", strconv.FormatInt(p.Size, 10))
-	c.Header("Content-Type", "application/octet-stream")
-	c.Header("X-Accel-Buffering", "no")
-	if c.Request.Method == http.MethodHead {
-		c.Status(200)
-		return
-	}
-	// Ignore a single Range and always send the complete file; never serve 206.
-	c.Status(200)
-	io.Copy(c.Writer, file)
-}
-
 func (a *ClientController) baseURL(c *gin.Context) string {
 	settings, err := a.service.Settings()
 	if err == nil && settings.PublicURL != "" {
 		return settings.PublicURL
 	}
+	return a.requestBaseURL(c)
+}
+func (a *ClientController) requestBaseURL(c *gin.Context) string {
 	scheme := "http"
 	if c.Request.TLS != nil {
 		scheme = "https"
 	}
 	return scheme + "://" + c.Request.Host + c.GetString("base_path")
-}
-
-func (a *ClientController) packageRoot() string {
-	if a.packageDir != "" {
-		return a.packageDir
-	}
-	return service.ClientPackageDir()
 }
 
 func (a *ClientController) releaseAssetLink(c *gin.Context) {

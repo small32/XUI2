@@ -96,7 +96,7 @@ go build ./...
 bash -n install.sh
 ```
 
-Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.2.8`；提交到 `main` 不会自动发布 Release。
+Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.3.0`；提交到 `main` 不会自动发布 Release。
 
 流量汇总的节点明细同时显示流量倍率、实际用量与计费用量（原“用量”）；上传、下载为节点原始计数。共享额度及自动超限停用按各节点倍率后的用量之和计算，超限后向所有下发节点发送停用配置。
 
@@ -105,7 +105,7 @@ Release 工作流仅在推送版本标签或手动触发时运行。`config/vers
 
 ## 管理端客户端服务（0.2.7）
 
-仅 `XUI_ROLE=manager` 注册客户端接口和安装包管理接口。被控端不注册接口、不显示客户端设置或下载区，也不新增客户端数据表；现有被控端无需升级。客户端服务默认开启，可在面板设置 → 面板配置中关闭，独立于网页登录开关。
+仅 `XUI_ROLE=manager` 注册客户端接口和 GitHub Release 设置接口。被控端不注册接口、不显示客户端设置或下载区，也不新增客户端数据表；现有被控端无需升级。客户端服务默认开启，可在面板设置 → 面板配置中关闭，独立于网页登录开关。
 
 客户端填写管理端前缀，例如 `https://small32.top:8201/`；有面板路径前缀时填写完整地址，例如 `https://example.com/panel/`。Webservices 在此前缀后拼接 `api/client/v1/`。面板根据浏览器当前登录地址显示服务地址，支持管理员保存外部访问地址用于反向代理。安装包不需要绑定固定管理端。
 
@@ -119,8 +119,8 @@ Release 工作流仅在推送版本标签或手动触发时运行。`config/vers
 | POST | `api/client/v1/auth/logout` | Bearer | 注销当前会话 |
 | GET | `api/client/v1/account` | Bearer | 当前账号账单、状态和订阅配置版本 |
 | GET | `api/client/v1/subscription/clash` | Bearer | 直接返回 Clash/Mihomo YAML，不使用第三方转换器 |
-| GET | `api/client/v1/downloads` | Bearer 或有效面板登录 | 已发布安装包列表 |
-| GET / HEAD | `api/client/v1/downloads/:id` | Bearer 或有效面板登录 | 托管安装包下载或外部分发链接跳转 |
+| GET | `api/client/v1/downloads` | Bearer 或有效面板登录 | GitHub 最新正式版的客户端安装包列表 |
+| GET / HEAD | `api/client/v1/release-downloads/:assetID` | Bearer 或有效面板登录 | GitHub Release 安装包直连或中转下载 |
 
 登录响应包含 `accessToken`、`refreshToken`、`tokenType=Bearer`、`expiresAt`、`refreshExpiresAt`。访问令牌有效期 24 小时，刷新令牌有效期 30 天；刷新后旧令牌失效。数据库只保存令牌哈希；账号改密、删除或关闭客户端服务后原登录不能访问接口。停用账号仍可以登录查询账单，不能获取可用订阅。登录失败沿用面板 IP 限流。
 
@@ -134,25 +134,26 @@ Release 工作流仅在推送版本标签或手动触发时运行。`config/vers
 
 配置默认 `mode: rule`、`ipv6: false`、DNS IPv6 关闭、`tun.enable: false`、`tun.stack: mixed`，配置管理端直连规则、内网直连、中国 IP 直连及其他流量走节点选择组。系统代理、自启、静默启动及用户选择的规则／直连／全局模式由后续客户端实现和保存；订阅更新不应覆盖用户选择。
 
-### 安装包管理及下载
+### GitHub 客户端安装包分发
 
-面板设置支持上传 Windows `.exe/.msi/.zip`、macOS `.dmg/.pkg/.zip`、Android `.apk`、iOS `.ipa`，也可保存 TestFlight／App Store 等 HTTP(S) 外部分发链接。可填写平台、架构、版本，独立发布、取消发布或删除。仅管理员允许管理安装包。最大上传大小 1GB，服务端生成存储名并计算 SHA256；目录为 `/etc/xui/client-packages`，数据库记录存于原面板数据库，面板升级不会覆盖这些数据。使用反向代理时其上传限制需允许所需包大小。
+客户端安装包统一从管理员配置的 GitHub 仓库最新正式版 Release 获取。Windows、macOS、Android、iOS 的安装包及版本在该仓库发布后，由管理端自动识别平台、架构和大小并生成下载入口。管理端仅保存 Release 元数据，安装包直连下载或经过管理端流式中转，不保存到服务器磁盘。
 
-管理端入站列表顶部、总用量下方显示已发布安装包，不提供打开客户端链接。Android／iOS 下载入口仅负责分发，不代表已构建这两个平台的定制客户端。
-
-手动上传的托管安装包在单个管理端进程内按登录账号限制一个有效下载流，客户端令牌与该账号面板会话共用下载名额；不同账号可分别下载。拒绝多段 Range，单段 Range 忽略并发送完整文件，永不返回 206；下载完成或连接断开后释放名额。HEAD 仅返回文件信息，不占用下载名额。外部分发链接不受此限制。反向代理须关闭该下载路径的缓存及响应缓冲，防止代理提前取完文件绕开并发限制；多实例部署需另外实现共享下载名额。
-
+管理端入站列表顶部、总用量下方显示 GitHub Release 的客户端下载入口，不提供打开客户端链接。Android／iOS 下载入口仅负责分发，不代表已构建这两个平台的定制客户端。
 
 ### 自动获取 GitHub 客户端 Release
 
-管理端“面板设置 → 面板配置 → 客户端服务”可启用“自动获取 GitHub 客户端”，手工填写仓库的 Release 地址，例如 `https://github.com/small32/SClash/releases/`，并保存 GitHub 访问令牌。私有仓库需要令牌；推荐 fine-grained PAT，仅授权目标仓库的 `Contents: Read-only`。令牌只保存在管理端数据库，浏览器仅收到“已配置”状态；密码框留空保留已有令牌，也可明确清除或替换。
+管理端“面板设置 → 面板配置 → 客户端服务”可启用“自动获取 GitHub 客户端”，填写仓库的 Release 地址，例如 `https://github.com/small32/SClash/releases/`。公开仓库无需授权；私有仓库使用“GitHub 授权”，不需要填写访问令牌。
 
-启用后，用户进入入站列表时自动读取最新正式版（不含草稿／预发布）并合并显示可识别的 Windows、macOS、Android、iOS 安装包。元数据缓存 10 分钟，下一次访问时检查更新；管理员可点击“检查最新版”立即刷新。检查失败保留最近成功的列表，并在管理员检查结果中显示原因。仓库未提供的平台不会生成虚假的下载入口。手动上传和外部分发链接仍可使用。
+首次授权由目标仓库所有者操作：填写 Release 地址，点击“连接 GitHub”，在 GitHub 确认创建应用，再将应用仅安装到目标仓库。完成后自动返回面板，显示连接状态、应用名称和授权仓库。应用仅需读取该仓库的内容。后续由管理端自动获取及续取 GitHub App 安装访问凭据，无需每小时人工授权。应用凭据保存在管理端数据库，迁移或恢复 XUI 时应备份数据库；这些凭据不返回客户端设置接口或终端设备。
+
+“重新授权”可重新建立连接；“断开连接”只删除 XUI 保存的关联及凭据，不会自动删除 GitHub App，需要彻底撤销时由所有者在 GitHub 删除应用。旧版 PAT 后端保持兼容，已配置时面板提供“清除旧令牌”，默认授权流程不再使用令牌输入框。
+
+启用后每 10 分钟自动检查最新正式版（不含草稿／预发布），用户进入入站列表时显示可识别的 Windows、macOS、Android、iOS 安装包；管理员可点击“检查最新版”立即刷新。检查失败保留最近成功的列表，并在管理员检查结果中显示原因。仓库未提供的平台不会生成虚假的下载入口。
 
 GitHub 下载方式支持 `auto`（默认）、`direct`、`relay`。自动模式下，未启用“允许本机使用上级服务器代理”时，下载链接直接指向 GitHub Release；启用该选项后默认经管理端的本机上级代理中转。管理员也可明确选择直连或中转。
 
-私有仓库直连在点击时由管理端携带 PAT 获取临时下载地址，然后浏览器直接从 GitHub 下载；链接不缓存到数据库，PAT 不返回浏览器、不转发 CDN。GitHub 资产接口若只返回文件流而不提供临时地址，会提示使用“中转”入口。入站列表在直连下载旁提供可选的中转链接。直连的数据流不经过 XUI，其下载并发由 GitHub 决定。
+私有仓库直连在点击时由管理端使用 GitHub App 安装访问凭据获取临时下载地址，然后浏览器直接从 GitHub 下载；链接不缓存到数据库，访问凭据不返回浏览器、不转发 CDN。GitHub 资产接口若只返回文件流而不提供临时地址，会提示使用“中转”入口。入站列表在直连下载旁提供可选的中转链接。直连的数据流不经过 XUI，其下载并发由 GitHub 决定。
 
-中转下载不落盘，每个登录账号最多 5 个并发下载线程，支持单个 Range 字节区间及 If-Range，转发 GitHub 的 200、206、416 状态和 Content-Range；第 6 个并发请求返回 429。不同账号独立计数。代理开启时，中转请求使用本机上级代理；关闭时直接由管理端连接 GitHub。手工上传安装包保持原单流规则。
+中转下载不落盘，每个登录账号最多 5 个并发下载线程，支持单个 Range 字节区间及 If-Range，转发 GitHub 的 200、206、416 状态和 Content-Range；第 6 个并发请求返回 429。不同账号独立计数。代理开启时，中转请求使用本机上级代理；关闭时直接由管理端连接 GitHub。
 
-新增 `POST xui/client/github-release` 为仅管理员可用的手动检查接口，JSON `{"refresh":true}` 强制刷新；`GET api/client/v1/release-links/:assetID` 获取私有临时链接；`GET/HEAD api/client/v1/release-downloads/:assetID` 按当前方式重定向或中转，`?relay=1` 明确请求中转。Release 地址通过 `githubReleaseUrl`、开关通过 `githubReleaseEnable`、下载方式通过 `githubDownloadMode` 保存；`githubToken` 仅用于提交新令牌，设置读取只返回 `githubTokenConfigured`。
+新增 `POST xui/client/github-release` 为仅管理员可用的手动检查接口，JSON `{"refresh":true}` 强制刷新；`POST xui/client/github/status`、`github/connect`、`github/disconnect` 分别查询授权状态、发起授权和断开连接。连接接口返回 GitHub 表单地址及 Manifest，由浏览器在当前页面提交并完成 GitHub 确认。`GET api/client/v1/release-links/:assetID` 获取私有临时链接；`GET/HEAD api/client/v1/release-downloads/:assetID` 按当前方式重定向或中转，`?relay=1` 明确请求中转。Release 地址通过 `githubReleaseUrl`、开关通过 `githubReleaseEnable`、下载方式通过 `githubDownloadMode` 保存；GitHub App 凭据由独立的授权流程保存，客户端设置不接收或返回应用凭据。`githubToken` 仅保留旧版兼容，设置读取只返回 `githubTokenConfigured`。

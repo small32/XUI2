@@ -44,14 +44,18 @@ func (s *ClientService) DirectGitHubAssetURL(ctx context.Context, id int64) (str
 	if selected == nil {
 		return "", errors.New("安装包已更新或不存在，请刷新下载列表")
 	}
-	if cfg.GitHubToken == "" {
+	token, err := s.GitHubAccessToken(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	if token == "" {
 		return selected.BrowserDownloadURL, nil
 	}
 	repo, err := parseClientGitHubRepo(cfg.GitHubReleaseURL)
 	if err != nil {
 		return "", err
 	}
-	return resolveClientGitHubAssetURL(ctx, newClientGitHubHTTPClient(false), "https://api.github.com", repo, cfg.GitHubToken, id)
+	return resolveClientGitHubAssetURL(ctx, newClientGitHubHTTPClient(false), "https://api.github.com", repo, token, id)
 }
 
 // Only inspect the GitHub redirect. No package bytes pass through XUI here.

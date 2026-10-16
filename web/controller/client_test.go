@@ -5,9 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,6 +37,7 @@ func TestClientAPIManagerOnlyAndAccountIsolation(t *testing.T) {
 	manager := gin.New()
 	manager.Use(func(c *gin.Context) { c.Set("base_path", "/panel/"); c.Next() })
 	RegisterClientAPI(manager.Group("/panel/"))
+	RegisterClientAdmin(manager.Group("/panel/xui"))
 	request := func(method, path, body, token string) *httptest.ResponseRecorder {
 		t.Helper()
 		w := httptest.NewRecorder()
@@ -67,42 +66,48 @@ func TestClientAPIManagerOnlyAndAccountIsolation(t *testing.T) {
 		t.Fatalf("subscription: %d %s", w.Code, w.Body.String())
 	}
 
-	dir := t.TempDir()
-	p := &model.ClientPackage{Platform: "windows", Version: "1.0", Filename: "client.exe", Published: true}
-	if err := new(service.ClientService).StorePackage(p, strings.NewReader("installer"), dir); err != nil {
+	// Upgraded databases may retain uploaded packages and external links. Neither
+	// may appear in the GitHub-only list, even if the old records were published.
+	if err := database.GetDB().Exec(`CREATE TABLE IF NOT EXISTS client_packages (
+		id INTEGER PRIMARY KEY, platform TEXT, arch TEXT, version TEXT,
+		filename TEXT, storage_name TEXT, external_url TEXT, size INTEGER,
+		sha256 TEXT, published NUMERIC, created_at INTEGER
+	)`).Error; err != nil {
 		t.Fatal(err)
 	}
-	downloadController := &ClientController{packageDir: dir}
-	manager.GET("/panel/api/client/v1/files-test/:id", downloadController.download)
-	manager.HEAD("/panel/api/client/v1/files-test/:id", downloadController.download)
-	path := "files-test/" + strconv.Itoa(p.Id)
-	download := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "https://manager.example/panel/api/client/v1/"+path, nil)
-	req.Header.Set("Authorization", "Bearer "+tokens.AccessToken)
-	req.Header.Set("Range", "bytes=0-2")
-	manager.ServeHTTP(download, req)
-	if download.Code != 200 || download.Body.String() != "installer" || download.Header().Get("Accept-Ranges") != "none" {
-		t.Fatalf("range bypass: %d %s", download.Code, download.Body.String())
-	}
-	release, ok := service.AcquireClientDownload("account:" + strconv.Itoa(in.Id))
-	if !ok {
-		t.Fatal("download slot remained locked")
-	}
-	w = request("GET", path, "", tokens.AccessToken)
-	release()
-	if w.Code != 429 {
-		t.Fatalf("parallel download allowed: %d", w.Code)
-	}
-	w = request("HEAD", path, "", tokens.AccessToken)
-	if w.Code != 200 || w.Body.Len() != 0 {
-		t.Fatalf("HEAD: %d %s", w.Code, w.Body.String())
-	}
-	database.GetDB().Model(p).Update("published", false)
-	if w = request("GET", path, "", tokens.AccessToken); w.Code != 404 {
-		t.Fatal("unpublished package downloaded")
-	}
-	if _, err := os.Stat(filepath.Join(dir, p.StorageName)); err != nil {
+	if err := database.GetDB().Exec(`INSERT INTO client_packages
+		(id, platform, arch, version, filename, storage_name, external_url, size, published)
+		VALUES (9001, 'windows', 'x64', 'legacy', 'legacy.exe', 'old.exe', '', 9, 1),
+		       (9002, 'ios', 'arm64', 'legacy', '', '', 'https://legacy.example/client', 0, 1)`).Error; err != nil {
 		t.Fatal(err)
+	}
+	clientSettings, err := new(service.ClientService).Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	clientSettings.GitHubReleaseEnable = false
+	if err := new(service.ClientService).SaveSettings(clientSettings); err != nil {
+		t.Fatal(err)
+	}
+	w = request(http.MethodGet, "downloads", "", tokens.AccessToken)
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != "[]" {
+		t.Fatalf("legacy packages leaked into GitHub-only downloads: %d %s", w.Code, w.Body.String())
+	}
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		for _, path := range []string{"downloads/9001", "downloads/9002"} {
+			if w := request(method, path, "", tokens.AccessToken); w.Code != http.StatusNotFound {
+				t.Fatalf("removed local download route still registered: %s %s: %d", method, path, w.Code)
+			}
+		}
+	}
+	for _, path := range []string{"packages", "packages/upload", "packages/9001/publish", "packages/9001/delete"} {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodPost, "https://manager.example/panel/xui/client/"+path, strings.NewReader("{}"))
+		r.Header.Set("Content-Type", "application/json")
+		manager.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("removed package administration route still registered: %s: %d %s", path, w.Code, w.Body.String())
+		}
 	}
 	database.GetDB().Model(&in).Update("expiry_time", time.Now().Add(-time.Hour).UnixMilli())
 	if w := request(http.MethodGet, "subscription/clash", "", tokens.AccessToken); w.Code != 403 {

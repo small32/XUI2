@@ -213,13 +213,21 @@ func (s *ClientService) GitHubRelease(ctx context.Context, force bool) (*ClientG
 	if err != nil {
 		return nil, err
 	}
-	key := strings.ToLower(repo) + ":" + clientHash(settings.GitHubToken)
+	credentialKey, err := s.GitHubCredentialKey(settings)
+	if err != nil {
+		return nil, err
+	}
+	key := strings.ToLower(repo) + ":" + credentialKey
 	value, _ := clientGitHubReleaseCache.LoadOrStore(key, &clientGitHubCacheEntry{})
 	entry := value.(*clientGitHubCacheEntry)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
 	if force || time.Now().After(entry.nextCheck) {
-		result, err := fetchClientGitHubRelease(ctx, newClientGitHubHTTPClient(false), "https://api.github.com", repo, settings.GitHubToken)
+		token, err := s.GitHubAccessToken(ctx, settings)
+		var result *ClientGitHubRelease
+		if err == nil {
+			result, err = fetchClientGitHubRelease(ctx, newClientGitHubHTTPClient(false), "https://api.github.com", repo, token)
+		}
 		entry.err = err
 		entry.nextCheck = time.Now().Add(time.Minute)
 		if err == nil {
@@ -261,7 +269,11 @@ func (s *ClientService) OpenGitHubAsset(ctx context.Context, id int64, downloadR
 	if err != nil {
 		return nil, nil, err
 	}
-	response, err := openClientGitHubAsset(ctx, newClientGitHubHTTPClient(true), "https://api.github.com", repo, settings.GitHubToken, id, downloadRange...)
+	token, err := s.GitHubAccessToken(ctx, settings)
+	if err != nil {
+		return nil, nil, err
+	}
+	response, err := openClientGitHubAsset(ctx, newClientGitHubHTTPClient(true), "https://api.github.com", repo, token, id, downloadRange...)
 	if err != nil {
 		return nil, nil, err
 	}

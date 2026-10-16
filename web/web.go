@@ -297,6 +297,18 @@ func (s *Server) startTask() {
 		} else if err := service.ApplySystemProxy(false); err != nil {
 			logger.Warning("清理本机代理失败: ", err)
 		}
+		refreshClientRelease := func() {
+			ctx, cancel := context.WithTimeout(s.ctx, 30*time.Second)
+			defer cancel()
+			release, err := new(service.ClientService).GitHubRelease(ctx, true)
+			if err != nil {
+				logger.Warning("客户端 Release 自动检查失败: ", err)
+			} else if release != nil && release.Error != "" {
+				logger.Warning("客户端 Release 自动检查失败，保留上次结果: ", release.Error)
+			}
+		}
+		s.cron.AddFunc("@every 10m", refreshClientRelease)
+		go refreshClientRelease()
 		return
 	}
 	if err := service.MaybeAgentMonthlyReset(); err != nil {

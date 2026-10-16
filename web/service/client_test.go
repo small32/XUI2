@@ -154,46 +154,7 @@ func TestClientAccountUsesWeightedBillingAndOfflineConfig(t *testing.T) {
 		t.Fatal("disabled account allowed")
 	}
 }
-func TestClientPackagesAndSingleDownload(t *testing.T) {
-	clientTestDB(t)
-	dir := t.TempDir()
-	s := new(ClientService)
-	p := &model.ClientPackage{Platform: "windows", Arch: "x64", Version: "1.0", Filename: "../client.exe", Published: true}
-	if err := s.StorePackage(p, strings.NewReader("installer"), dir); err != nil {
-		t.Fatal(err)
-	}
-	if p.Filename != "client.exe" || p.Size != 9 || len(p.SHA256) != 64 {
-		t.Fatalf("package: %+v", p)
-	}
-	rows, err := s.Packages(true)
-	if err != nil || len(rows) != 1 {
-		t.Fatal(err)
-	}
-	release, ok := AcquireClientDownload("test-account")
-	if !ok {
-		t.Fatal("first download denied")
-	}
-	if _, ok := AcquireClientDownload("test-account"); ok {
-		t.Fatal("parallel download allowed")
-	}
-	other, ok := AcquireClientDownload("other-account")
-	if !ok {
-		t.Fatal("unrelated account blocked")
-	}
-	other()
-	release()
-	release, ok = AcquireClientDownload("test-account")
-	if !ok {
-		t.Fatal("slot not released")
-	}
-	release()
-	if err := s.DeletePackage(p.Id, dir); err != nil {
-		t.Fatal(err)
-	}
-	rows, _ = s.Packages(true)
-	if len(rows) != 0 {
-		t.Fatal("deleted package still published")
-	}
+func TestClientURLValidation(t *testing.T) {
 	for _, u := range []string{"javascript:alert(1)", "https://user:password@example.com/", "https://example.com/?password=x"} {
 		if _, err := ValidateClientURL(u); err == nil {
 			t.Fatalf("invalid URL accepted: %s", u)
@@ -204,16 +165,23 @@ func TestClientPackagesAndSingleDownload(t *testing.T) {
 	}
 }
 
-func TestClientTablesAreNotAddedToAgent(t *testing.T) {
-	t.Setenv("XUI_ROLE", "agent")
-	if err := database.InitDB(filepath.Join(t.TempDir(), "agent.db")); err != nil {
-		t.Fatal(err)
-	}
-	db := database.GetDB()
-	sqlDB, _ := db.DB()
-	t.Cleanup(func() { sqlDB.Close() })
-	if db.Migrator().HasTable(&model.ClientSession{}) || db.Migrator().HasTable(&model.ClientPackage{}) {
-		t.Fatal("agent received manager-only client tables")
+func TestClientTablesFollowRole(t *testing.T) {
+	for _, role := range []string{"manager", "agent"} {
+		t.Run(role, func(t *testing.T) {
+			t.Setenv("XUI_ROLE", role)
+			if err := database.InitDB(filepath.Join(t.TempDir(), "client.db")); err != nil {
+				t.Fatal(err)
+			}
+			db := database.GetDB()
+			sqlDB, _ := db.DB()
+			t.Cleanup(func() { sqlDB.Close() })
+			if db.Migrator().HasTable(&model.ClientSession{}) != (role == "manager") {
+				t.Fatal("client sessions must only be created on the manager")
+			}
+			if db.Migrator().HasTable("client_packages") {
+				t.Fatal("manual client package table is no longer used")
+			}
+		})
 	}
 }
 

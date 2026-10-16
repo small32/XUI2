@@ -136,7 +136,7 @@ func initManagement() error {
 		return err
 	}
 	if config.Role() == "manager" {
-		return db.AutoMigrate(&model.ClientSession{}, &model.ClientPackage{})
+		return db.AutoMigrate(&model.ClientSession{})
 	}
 	return nil
 }
