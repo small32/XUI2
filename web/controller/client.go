@@ -43,6 +43,9 @@ func RegisterClientAPI(g *gin.RouterGroup) {
 	api.GET("/downloads", a.downloads)
 	api.GET("/downloads/:id", a.download)
 	api.HEAD("/downloads/:id", a.download)
+	api.GET("/release-downloads/:assetID", a.downloadReleaseAsset)
+	api.HEAD("/release-downloads/:assetID", a.downloadReleaseAsset)
+	api.GET("/release-links/:assetID", a.releaseAssetLink)
 	private := api.Group("")
 	private.Use(a.authenticate)
 	private.POST("/auth/logout", a.logout)
@@ -58,6 +61,7 @@ func RegisterClientAdmin(g *gin.RouterGroup) {
 	g.Use(a.checkAdminLogin)
 	g.POST("/settings", a.settings)
 	g.POST("/settings/update", a.saveSettings)
+	g.POST("/github-release", a.gitHubRelease)
 	g.POST("/packages", a.packages)
 	g.POST("/packages/upload", a.upload)
 	g.POST("/packages/:id/publish", a.publish)
@@ -171,12 +175,26 @@ func (a *ClientController) settings(c *gin.Context) {
 	jsonObj(c, v, err)
 }
 func (a *ClientController) saveSettings(c *gin.Context) {
-	v := &service.ClientSettings{}
-	if err := c.ShouldBindJSON(v); err != nil {
+	var input struct {
+		service.ClientSettings
+		GitHubToken *string `json:"githubToken"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
 		jsonMsg(c, "保存客户端设置", err)
 		return
 	}
-	jsonMsg(c, "保存客户端设置", a.service.SaveSettings(v))
+	jsonMsg(c, "保存客户端设置", a.service.SaveSettings(&input.ClientSettings, input.GitHubToken))
+}
+func (a *ClientController) gitHubRelease(c *gin.Context) {
+	var input struct {
+		Refresh bool `json:"refresh"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		jsonMsg(c, "检查最新版", err)
+		return
+	}
+	value, err := a.service.GitHubRelease(c.Request.Context(), input.Refresh)
+	jsonObj(c, value, err)
 }
 func (a *ClientController) packages(c *gin.Context) {
 	v, err := a.service.Packages(false)
@@ -270,6 +288,33 @@ func (a *ClientController) downloads(c *gin.Context) {
 		}
 		out = append(out, gin.H{"id": p.Id, "platform": p.Platform, "arch": p.Arch, "version": p.Version, "filename": p.Filename, "size": p.Size, "sha256": p.SHA256, "url": url, "hosted": p.ExternalURL == ""})
 	}
+	release, err := a.service.GitHubRelease(c.Request.Context(), false)
+	if err != nil {
+		c.Header("X-Client-Release-Error", "unavailable")
+	} else if release != nil {
+		relay, err := a.service.GitHubRelayEnabled()
+		if err != nil {
+			clientError(c, 500, err)
+			return
+		}
+		cfg, err := a.service.Settings()
+		if err != nil {
+			clientError(c, 500, err)
+			return
+		}
+		for _, asset := range release.Assets {
+			assetID := strconv.FormatInt(asset.ID, 10)
+			relayURL := c.GetString("base_path") + "api/client/v1/release-downloads/" + assetID + "?relay=1"
+			link := asset.BrowserDownloadURL
+			resolveURL := ""
+			if relay {
+				link = relayURL
+			} else if cfg.GitHubTokenConfigured {
+				resolveURL = c.GetString("base_path") + "api/client/v1/release-links/" + assetID
+			}
+			out = append(out, gin.H{"id": "github-" + assetID, "platform": asset.Platform, "arch": asset.Arch, "version": release.TagName, "filename": asset.Name, "size": asset.Size, "sha256": asset.SHA256, "url": link, "resolveUrl": resolveURL, "relayUrl": relayURL, "hosted": relay, "source": "github"})
+		}
+	}
 	c.JSON(200, out)
 }
 func (a *ClientController) download(c *gin.Context) {
@@ -340,4 +385,100 @@ func (a *ClientController) packageRoot() string {
 		return a.packageDir
 	}
 	return service.ClientPackageDir()
+}
+
+func (a *ClientController) releaseAssetLink(c *gin.Context) {
+	if a.downloadIdentity(c) == "" {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("assetID"), 10, 64)
+	if err != nil || id <= 0 {
+		clientError(c, 400, fmt.Errorf("安装包编号无效"))
+		return
+	}
+	link, err := a.service.DirectGitHubAssetURL(c.Request.Context(), id)
+	if err != nil {
+		clientError(c, 502, err)
+		return
+	}
+	c.JSON(200, gin.H{"url": link})
+}
+func (a *ClientController) downloadReleaseAsset(c *gin.Context) {
+	identity := a.downloadIdentity(c)
+	if identity == "" {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("assetID"), 10, 64)
+	if err != nil || id <= 0 {
+		clientError(c, 400, fmt.Errorf("安装包编号无效"))
+		return
+	}
+	relay, err := a.service.GitHubRelayEnabled()
+	if err != nil {
+		clientError(c, 500, err)
+		return
+	}
+	if !relay && c.Query("relay") != "1" {
+		link, err := a.service.DirectGitHubAssetURL(c.Request.Context(), id)
+		if err != nil {
+			clientError(c, 502, err)
+			return
+		}
+		c.Redirect(http.StatusFound, link)
+		return
+	}
+	rangeHeader := c.GetHeader("Range")
+	if strings.Contains(rangeHeader, ",") {
+		clientError(c, 416, fmt.Errorf("每个下载线程只支持一个字节范围"))
+		return
+	}
+	if c.Request.Method == http.MethodHead {
+		release, err := a.service.GitHubRelease(c.Request.Context(), false)
+		if err != nil {
+			clientError(c, 502, err)
+			return
+		}
+		for _, asset := range release.Assets {
+			if asset.ID == id {
+				clientAssetHeaders(c, asset.Name, asset.Size)
+				c.Header("Accept-Ranges", "bytes")
+				c.Status(200)
+				return
+			}
+		}
+		clientError(c, 404, fmt.Errorf("安装包已更新或不存在，请刷新下载列表"))
+		return
+	}
+	release, ok := service.AcquireClientRelayDownload(identity)
+	if !ok {
+		clientError(c, 429, fmt.Errorf("此账号最多支持 5 个并发下载线程"))
+		return
+	}
+	defer release()
+	response, asset, err := a.service.OpenGitHubAsset(c.Request.Context(), id, rangeHeader, c.GetHeader("If-Range"))
+	if err != nil {
+		clientError(c, 502, err)
+		return
+	}
+	defer response.Body.Close()
+	clientAssetHeaders(c, asset.Name, asset.Size)
+	c.Header("Accept-Ranges", "bytes")
+	c.Header("Content-Length", "")
+	if response.ContentLength >= 0 {
+		c.Header("Content-Length", strconv.FormatInt(response.ContentLength, 10))
+	}
+	for _, name := range []string{"Content-Range", "ETag", "Last-Modified"} {
+		if value := response.Header.Get(name); value != "" {
+			c.Header(name, value)
+		}
+	}
+	c.Status(response.StatusCode)
+	io.Copy(c.Writer, response.Body)
+}
+func clientAssetHeaders(c *gin.Context, filename string, size int64) {
+	c.Header("Accept-Ranges", "none")
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	c.Header("Content-Length", strconv.FormatInt(size, 10))
+	c.Header("Content-Type", "application/octet-stream")
+	c.Header("X-Accel-Buffering", "no")
 }

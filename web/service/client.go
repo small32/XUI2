@@ -15,8 +15,13 @@ import (
 const clientSettingsKey = "clientSettings"
 
 type ClientSettings struct {
-	Enabled   bool   `json:"enabled"`
-	PublicURL string `json:"publicUrl"`
+	Enabled               bool   `json:"enabled"`
+	PublicURL             string `json:"publicUrl"`
+	GitHubDownloadMode    string `json:"githubDownloadMode"`
+	GitHubReleaseEnable   bool   `json:"githubReleaseEnable"`
+	GitHubReleaseURL      string `json:"githubReleaseUrl"`
+	GitHubTokenConfigured bool   `json:"githubTokenConfigured"`
+	GitHubToken           string `json:"-"`
 }
 type ClientService struct{}
 type ClientTokens struct {
@@ -36,7 +41,7 @@ func clientRandom() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 func (s *ClientService) Settings() (*ClientSettings, error) {
-	v := &ClientSettings{Enabled: true}
+	v := &ClientSettings{Enabled: true, GitHubReleaseURL: "https://github.com/small32/SClash/releases/", GitHubDownloadMode: "auto"}
 	row, err := getClientSetting()
 	if err != nil {
 		return nil, err
@@ -60,12 +65,42 @@ func ValidateClientURL(raw string) (string, error) {
 	u.Path = strings.TrimRight(u.Path, "/") + "/"
 	return u.String(), nil
 }
-func (s *ClientService) SaveSettings(v *ClientSettings) error {
+func (s *ClientService) SaveSettings(v *ClientSettings, token ...*string) error {
 	addr, err := ValidateClientURL(v.PublicURL)
 	if err != nil {
 		return err
 	}
 	v.PublicURL = addr
+	if v.GitHubDownloadMode == "" {
+		v.GitHubDownloadMode = "auto"
+	}
+	switch v.GitHubDownloadMode {
+	case "auto", "direct", "relay":
+	default:
+		return errors.New("GitHub 下载方式无效")
+	}
+	if v.GitHubReleaseURL != "" {
+		repo, err := parseClientGitHubRepo(v.GitHubReleaseURL)
+		if err != nil {
+			return err
+		}
+		v.GitHubReleaseURL = "https://github.com/" + repo + "/releases/"
+	}
+	if v.GitHubReleaseEnable && v.GitHubReleaseURL == "" {
+		return errors.New("请填写 GitHub Release 地址")
+	}
+	old, err := s.Settings()
+	if err != nil {
+		return err
+	}
+	v.GitHubToken = old.GitHubToken
+	if len(token) > 0 && token[0] != nil {
+		v.GitHubToken = strings.TrimSpace(*token[0])
+	}
+	if strings.ContainsAny(v.GitHubToken, "\r\n") {
+		return errors.New("GitHub 令牌格式无效")
+	}
+	v.GitHubTokenConfigured = v.GitHubToken != ""
 	return saveClientSetting(v)
 }
 func (s *ClientService) Login(port, password string) (*ClientTokens, error) {

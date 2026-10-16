@@ -58,8 +58,44 @@
                                     <p>Webservices：[[clientServerAddress+'api/client/v1/']]</p>
                                     <a-button @click="copyClientAddress">复制服务器地址</a-button>
                                     <a-button @click="clientSettings.publicUrl=clientDefaultAddress">使用当前登录地址</a-button>
-                                    <a-button type="primary" @click="saveClientSettings">保存客户端设置</a-button>
                                 </a-form-item>
+                                <a-form-item label="自动获取 GitHub 客户端"><a-switch v-model="clientSettings.githubReleaseEnable"></a-switch></a-form-item>
+                                <a-form-item label="GitHub Release 地址">
+                                    <a-input v-model.trim="clientSettings.githubReleaseUrl" placeholder="https://github.com/small32/SClash/releases/"></a-input>
+                                    <p>启用后自动获取此仓库最新正式版的客户端安装包，手动上传仍可使用。</p>
+                                </a-form-item>
+                                <a-form-item label="GitHub 安装包下载方式">
+                                    <a-select v-model="clientSettings.githubDownloadMode" style="width:100%;max-width:440px">
+                                        <a-select-option value="auto">自动（默认，按本机代理设置选择）</a-select-option>
+                                        <a-select-option value="direct">直接从 GitHub 下载</a-select-option>
+                                        <a-select-option value="relay">通过管理端中转下载</a-select-option>
+                                    </a-select>
+                                    <p>自动模式默认直连 GitHub；开启“允许本机使用上级服务器代理”后，改为通过管理端的本机代理中转。</p>
+                                    <p>直连模式由设备从 GitHub 下载；私有仓库使用临时下载链接，不向设备提供 GitHub 访问令牌。</p>
+                                    <p>中转模式支持 Range 分段下载，每个登录账号最多同时使用 5 个下载线程；开启本机代理时，中转请求使用该代理。</p>
+                                    <p>自动获取的 GitHub 安装包不保存到服务器磁盘。</p>
+                                </a-form-item>
+                                <a-form-item label="GitHub 访问令牌（私有仓库需要）">
+                                    <a-input v-model.trim="clientGitHubToken" type="password" autocomplete="new-password" :placeholder="clientSettings.githubTokenConfigured?'已配置，留空保留原令牌':'未配置访问令牌'"></a-input>
+                                    <p>[[clientSettings.githubTokenConfigured?'已配置令牌；原令牌不会显示。':'尚未配置令牌。']] 留空保存不会清除原令牌。</p>
+                                    <p>使用 fine-grained personal access token，仅选择需要读取的仓库，并授予 Contents: Read-only 权限。</p>
+                                    <a-button v-if="clientSettings.githubTokenConfigured" type="link" :disabled="clientSettingsSaving||clientGitHubChecking" @click="clearClientGitHubToken">清除已保存令牌</a-button>
+                                </a-form-item>
+                                <a-form-item>
+                                    <a-button type="primary" :loading="clientSettingsSaving" :disabled="clientGitHubChecking" @click="saveClientSettings()">保存客户端设置</a-button>
+                                    <a-button :loading="clientGitHubChecking" :disabled="clientSettingsSaving||!clientSettings.githubReleaseEnable" @click="checkClientGitHubRelease">检查最新版</a-button>
+                                    <p>检查前会保存当前客户端设置和新填写的令牌。</p>
+                                </a-form-item>
+                                <div v-if="clientGitHubRelease">
+                                    <p v-if="clientGitHubRelease.error" style="color:#f5222d">[[clientGitHubRelease.error]]</p>
+                                    <template v-if="clientGitHubRelease.tagName">
+                                        <p>最新版本：<a :href="clientGitHubRelease.htmlUrl" target="_blank" rel="noopener">[[clientGitHubRelease.tagName]]</a></p>
+                                        <p v-if="clientGitHubRelease.fetchedAt">最近检查：[[new Date(clientGitHubRelease.fetchedAt*1000).toLocaleString()]]</p>
+                                        <div v-for="asset in clientGitHubRelease.assets" :key="asset.name" style="margin-bottom:6px">
+                                            [[asset.name]] · [[asset.platform]] [[asset.arch]] · [[sizeFormat(asset.size)]]
+                                        </div>
+                                    </template>
+                                </div>
                             </a-form>
                             <a-divider>客户端安装包</a-divider>
                             <a-form style="background:white;padding:16px">
@@ -70,7 +106,7 @@
                                 <a-form-item v-if="!clientPackage.externalUrl" label="安装包（最大 1GB）"><input ref="clientPackageFile" type="file" accept=".exe,.msi,.zip,.dmg,.pkg,.apk,.ipa"></a-form-item>
                                 <a-form-item label="立即发布"><a-switch v-model="clientPackage.published"></a-switch></a-form-item>
                                 <a-button type="primary" :loading="clientUploading" @click="uploadClientPackage">上传 / 添加</a-button>
-                                <p>托管安装包仅允许每个登录账号一个下载流，不支持分段下载。外部分发链接的下载规则由目标平台决定。</p>
+                                <p>手动上传的安装包仅允许每个登录账号一个下载流，不支持分段下载。外部分发链接的下载规则由目标平台决定。</p>
                             </a-form>
                             <a-table :data-source="clientPackages" row-key="id" :pagination="false" :scroll="{x:900}" size="small">
                                 <a-table-column title="平台" data-index="platform"></a-table-column>
@@ -157,7 +193,11 @@
             connInfo: null,
             showToken: false,
             refreshingFingerprint: false,
-            clientSettings: {enabled:true,publicUrl:''},
+            clientSettings: {enabled:true,publicUrl:'',githubReleaseEnable:false,githubReleaseUrl:'https://github.com/small32/SClash/releases/',githubDownloadMode:'auto',githubTokenConfigured:false},
+            clientGitHubToken: '',
+            clientSettingsSaving: false,
+            clientGitHubChecking: false,
+            clientGitHubRelease: null,
             clientDefaultAddress: new URL('{{ .base_path }}',location.origin).href,
             clientPackages: [],
             clientPackage: {platform:'windows',arch:'x64',version:'',externalUrl:'',published:true},
@@ -172,11 +212,36 @@
                 const msg=await response.json();if(!msg.success)throw new Error(msg.msg||'操作失败');return msg;
             },
             async loadClientSettings() {
-                try {this.clientSettings=(await this.clientAdminRequest('settings')).obj;await this.loadClientPackages();}catch(e){this.$message.error(e.message);}
+                try {this.clientSettings={githubDownloadMode:'auto',...(await this.clientAdminRequest('settings')).obj};await this.loadClientPackages();}catch(e){this.$message.error(e.message);}
             },
             async loadClientPackages() {this.clientPackages=(await this.clientAdminRequest('packages')).obj||[];},
-            async saveClientSettings() {
-                try {await this.clientAdminRequest('settings/update',this.clientSettings);this.$message.success('客户端设置已保存');}catch(e){this.$message.error(e.message);}
+            async saveClientSettings(showSuccess=true,tokenOverride) {
+                if(this.clientSettingsSaving)return false;
+                this.clientSettingsSaving=true;
+                try {
+                    const body={...this.clientSettings};
+                    if(tokenOverride!==undefined)body.githubToken=tokenOverride;
+                    else if(this.clientGitHubToken)body.githubToken=this.clientGitHubToken;
+                    await this.clientAdminRequest('settings/update',body);
+                    this.clientGitHubToken='';
+                    this.clientSettings={githubDownloadMode:'auto',...(await this.clientAdminRequest('settings')).obj};
+                    if(showSuccess)this.$message.success('客户端设置已保存');
+                    return true;
+                }catch(e){this.$message.error(e.message);return false;}
+                finally{this.clientSettingsSaving=false;}
+            },
+            async clearClientGitHubToken() {
+                if(await this.saveClientSettings(false,''))this.$message.success('已清除 GitHub 访问令牌');
+            },
+            async checkClientGitHubRelease() {
+                if(this.clientGitHubChecking)return;
+                this.clientGitHubChecking=true;
+                this.clientGitHubRelease=null;
+                try {
+                    if(!await this.saveClientSettings(false))return;
+                    this.clientGitHubRelease=(await this.clientAdminRequest('github-release',{refresh:true})).obj;
+                }catch(e){this.clientGitHubRelease={error:e.message};this.$message.error(e.message);}
+                finally{this.clientGitHubChecking=false;}
             },
             async copyClientAddress() {
                 try {await navigator.clipboard.writeText(this.clientServerAddress);this.$message.success('服务器地址已复制');}catch(e){this.$message.error('请手动复制当前服务器地址');}

@@ -16,9 +16,25 @@ func getClientSetting() (string, error) {
 	}
 	return row.Value, err
 }
-func decodeClientSettings(raw string, v *ClientSettings) error { return json.Unmarshal([]byte(raw), v) }
+func decodeClientSettings(raw string, v *ClientSettings) error {
+	if err := json.Unmarshal([]byte(raw), v); err != nil {
+		return err
+	}
+	var secret struct {
+		GitHubToken string `json:"githubToken"`
+	}
+	if err := json.Unmarshal([]byte(raw), &secret); err != nil {
+		return err
+	}
+	v.GitHubToken = secret.GitHubToken
+	v.GitHubTokenConfigured = v.GitHubToken != ""
+	return nil
+}
 func saveClientSetting(v *ClientSettings) error {
-	b, err := json.Marshal(v)
+	b, err := json.Marshal(struct {
+		*ClientSettings
+		GitHubToken string `json:"githubToken"`
+	}{v, v.GitHubToken})
 	if err != nil {
 		return err
 	}

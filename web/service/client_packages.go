@@ -19,16 +19,30 @@ import (
 const ClientPackageMaxSize int64 = 1024 * 1024 * 1024
 
 var clientDownloadMu sync.Mutex
-var clientDownloads = map[string]bool{}
+var clientDownloads = map[string]int{}
 
-func AcquireClientDownload(account string) (func(), bool) {
+func AcquireClientDownload(account string) (func(), bool) { return acquireClientDownload(account, 1) }
+func AcquireClientRelayDownload(account string) (func(), bool) {
+	return acquireClientDownload(account, 5)
+}
+func acquireClientDownload(account string, limit int) (func(), bool) {
 	clientDownloadMu.Lock()
 	defer clientDownloadMu.Unlock()
-	if clientDownloads[account] {
+	if clientDownloads[account] >= limit {
 		return nil, false
 	}
-	clientDownloads[account] = true
-	return func() { clientDownloadMu.Lock(); delete(clientDownloads, account); clientDownloadMu.Unlock() }, true
+	clientDownloads[account]++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			clientDownloadMu.Lock()
+			defer clientDownloadMu.Unlock()
+			clientDownloads[account]--
+			if clientDownloads[account] <= 0 {
+				delete(clientDownloads, account)
+			}
+		})
+	}, true
 }
 func ClientPackageDir() string {
 	return filepath.Join(filepath.Dir(config.GetDBPath()), "client-packages")

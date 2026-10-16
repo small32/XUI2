@@ -44,12 +44,14 @@
                                 <div class="client-downloads">
                                     <span>客户端下载：</span>
                                     <span v-if="!clientDownloads.length" style="color:#888">暂无已发布安装包</span>
-                                    <a v-for="pkg in clientDownloads" :key="pkg.id" :href="pkg.url"
-                                       :target="pkg.hosted?'_self':'_blank'" rel="noopener"
-                                       :title="pkg.version+(pkg.size?' · '+sizeFormat(pkg.size):'')">
-                                        [[ clientPlatformName(pkg.platform) ]] [[ pkg.arch ]]
-                                    </a>
-                                    <a :href="clientLaunchUrl">打开客户端</a>
+                                    <span v-for="pkg in clientDownloads" :key="pkg.id" style="display:inline-flex;gap:6px;align-items:center">
+                                        <a :href="pkg.url" @click="downloadClient($event,pkg)"
+                                           :target="pkg.hosted||pkg.resolveUrl?'_self':'_blank'" rel="noopener"
+                                           :title="pkg.version+(pkg.size?' · '+sizeFormat(pkg.size):'')">
+                                            [[ clientPlatformName(pkg.platform) ]] [[ pkg.arch ]]
+                                        </a>
+                                        <a v-if="pkg.relayUrl&&!pkg.hosted" :href="pkg.relayUrl" title="服务器中转下载，最多5个并发线程">中转</a>
+                                    </span>
                                 </div>
                             </a-col>
                             {{end}}
@@ -212,7 +214,6 @@
         data: {
             siderDrawer,
             clientDownloads: [],
-            clientLaunchUrl: 'xui-clash://connect?server='+encodeURIComponent(new URL('{{ .base_path }}',location.origin).href),
             restricted,
             role,
             canEditInbound: {{ .canEditInbound }},
@@ -233,13 +234,18 @@
             clientPlatformName(platform) {
                 return {windows:'Windows',macos:'macOS',android:'Android',ios:'iOS'}[platform]||platform;
             },
+            async downloadClient(event,pkg) {
+                if(!pkg.resolveUrl)return;
+                event.preventDefault();
+                try {
+                    const response=await fetch(pkg.resolveUrl,{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});
+                    const data=await response.json();if(!response.ok||!data.url)throw new Error(data.error||'获取下载链接失败');
+                    window.location.assign(data.url);
+                } catch(e) {this.$message.error(e.message);}
+            },
             async loadClientDownloads() {
-                const [rows,info]=await Promise.all([
-                    HttpUtil.get('api/client/v1/downloads'),
-                    HttpUtil.get('api/client/v1/info')
-                ]);
+                const rows=await HttpUtil.get('api/client/v1/downloads');
                 if(Array.isArray(rows))this.clientDownloads=rows;
-                if(info.serverAddress)this.clientLaunchUrl='xui-clash://connect?server='+encodeURIComponent(info.serverAddress);
             },
             loading(spinning=true) {
                 this.spinning = spinning;
