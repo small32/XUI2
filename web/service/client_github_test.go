@@ -160,6 +160,81 @@ func TestClientGitHubPrivateAssetStream(t *testing.T) {
 	}
 }
 
+func TestClientGitHubAssetRedirectOmitsEmptyRangeHeaders(t *testing.T) {
+	clientTestDB(t)
+	for _, tc := range []struct {
+		name, rangeHeader, ifRange string
+		status                     int
+		body                       string
+	}{
+		{name: "ordinary browser download", status: http.StatusOK, body: "installer"},
+		{name: "range without validator", rangeHeader: "bytes=0-3", status: http.StatusPartialContent, body: "inst"},
+		{name: "range with validator", rangeHeader: "bytes=0-3", ifRange: `"file-v1"`, status: http.StatusPartialContent, body: "inst"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var apiCalls, cdnCalls int32
+			var server *httptest.Server
+			server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// A present-but-empty Range is different from an absent Range:
+				// the real release-assets CDN rejects the former with HTTP 501.
+				for name, want := range map[string]string{"Range": tc.rangeHeader, "If-Range": tc.ifRange} {
+					values, present := r.Header[name]
+					if present && (len(values) == 0 || strings.TrimSpace(values[0]) == "") {
+						t.Errorf("%s received empty %s", r.URL.Path, name)
+						w.WriteHeader(http.StatusNotImplemented)
+						return
+					}
+					if want == "" && present || want != "" && (!present || r.Header.Get(name) != want) {
+						t.Errorf("%s %s: got %q (present=%v), want %q", r.URL.Path, name, r.Header.Get(name), present, want)
+					}
+				}
+				if r.Method != http.MethodGet || r.Header.Get("Accept") != "application/octet-stream" {
+					t.Errorf("unexpected asset request: %s Accept=%q", r.Method, r.Header.Get("Accept"))
+				}
+				switch r.URL.Path {
+				case "/repos/small32/SClash/releases/assets/42":
+					atomic.AddInt32(&apiCalls, 1)
+					if r.Header.Get("Authorization") != "Bearer test-installation-token" {
+						t.Error("private API request omitted its installation token")
+					}
+					http.Redirect(w, r, server.URL+"/cdn", http.StatusFound)
+				case "/cdn":
+					atomic.AddInt32(&cdnCalls, 1)
+					if _, present := r.Header["Authorization"]; present {
+						t.Error("installation token leaked to the asset CDN")
+					}
+					w.Header().Set("Content-Type", "application/octet-stream")
+					if tc.status == http.StatusPartialContent {
+						w.Header().Set("Content-Range", "bytes 0-3/9")
+					}
+					w.WriteHeader(tc.status)
+					fmt.Fprint(w, tc.body)
+				default:
+					t.Errorf("unexpected download path: %s", r.URL.Path)
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer server.Close()
+			client := newClientGitHubHTTPClient(true)
+			// Trust only the mock TLS certificate while retaining production
+			// redirect handling, including removing API credentials at the CDN.
+			client.Transport = server.Client().Transport
+			response, err := openClientGitHubAsset(context.Background(), client, server.URL, "small32/SClash", "test-installation-token", 42, tc.rangeHeader, tc.ifRange)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != tc.status || string(body) != tc.body {
+				t.Fatalf("redirected asset response: status=%d body=%q error=%v", response.StatusCode, body, err)
+			}
+			if atomic.LoadInt32(&apiCalls) != 1 || atomic.LoadInt32(&cdnCalls) != 1 {
+				t.Fatalf("download did not follow API to CDN exactly once: api=%d cdn=%d", apiCalls, cdnCalls)
+			}
+		})
+	}
+}
+
 func TestClientGitHubDownloadModeDefaults(t *testing.T) {
 	clientTestDB(t)
 	s := new(ClientService)

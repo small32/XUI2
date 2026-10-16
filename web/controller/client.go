@@ -38,6 +38,7 @@ func RegisterClientAPI(g *gin.RouterGroup) {
 	api.POST("/auth/login", a.login)
 	api.POST("/auth/refresh", a.refresh)
 	api.GET("/downloads", a.downloads)
+	api.GET("/guide", a.guide)
 	api.GET("/release-downloads/:assetID", a.downloadReleaseAsset)
 	api.HEAD("/release-downloads/:assetID", a.downloadReleaseAsset)
 	api.GET("/release-links/:assetID", a.releaseAssetLink)
@@ -56,6 +57,8 @@ func RegisterClientAdmin(g *gin.RouterGroup) {
 	g.Use(a.checkAdminLogin)
 	g.POST("/settings", a.settings)
 	g.POST("/settings/update", a.saveSettings)
+	g.POST("/guide", a.adminGuide)
+	g.POST("/guide/update", a.saveGuide)
 	g.POST("/github-release", a.gitHubRelease)
 	g.POST("/github/connect", a.connectGitHubApp)
 	g.POST("/github/status", a.gitHubAppStatus)
@@ -180,6 +183,45 @@ func (a *ClientController) saveSettings(c *gin.Context) {
 		return
 	}
 	jsonMsg(c, "保存客户端设置", a.service.SaveSettings(&input.ClientSettings, input.GitHubToken))
+}
+func (a *ClientController) guide(c *gin.Context) {
+	if a.downloadIdentity(c) == "" {
+		return
+	}
+	value, err := a.service.Guide()
+	if err != nil {
+		clientError(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, value)
+}
+func (a *ClientController) adminGuide(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	value, err := a.service.Guide()
+	jsonObj(c, value, err)
+}
+func (a *ClientController) saveGuide(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	// A JSON string can encode each HTML byte as a six-byte Unicode escape.
+	const requestLimit = 6*int64(service.ClientGuideMaxSize) + 1024*1024
+	if c.Request.ContentLength > requestLimit {
+		jsonMsg(c, "保存使用说明", fmt.Errorf("请求过大，使用说明 HTML 最大支持 20MB"))
+		return
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, requestLimit)
+	var input struct {
+		HTML *string `json:"html"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		jsonMsg(c, "保存使用说明", err)
+		return
+	}
+	if input.HTML == nil {
+		jsonMsg(c, "保存使用说明", fmt.Errorf("请提供字符串格式的 html"))
+		return
+	}
+	value, err := a.service.SaveGuide(*input.HTML)
+	jsonObj(c, value, err)
 }
 func (a *ClientController) gitHubRelease(c *gin.Context) {
 	var input struct {

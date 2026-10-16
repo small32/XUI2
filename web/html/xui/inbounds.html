@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
+{{if eq .role "manager"}}<link rel="stylesheet" href="{{ .base_path }}assets/css/client-guide.css?{{ .cur_ver }}">{{end}}
 <style>
     @media (min-width: 769px) {
         .ant-layout-content {
@@ -11,7 +12,9 @@
     .ant-col-sm-24 {
         margin-top: 10px;
     }
-    .client-downloads { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; }
+    .client-downloads { display:flex; align-items:center; gap:8px; }
+    .client-download-item { padding:12px 0; border-bottom:1px solid #f0f0f0; overflow-wrap:anywhere; }
+    .client-download-item:last-child { border-bottom:0; }
 </style>
 <body>
 <a-layout id="app" v-cloak>
@@ -43,15 +46,8 @@
                             <a-col :xs="24" :sm="24" :lg="12">
                                 <div class="client-downloads">
                                     <span>客户端下载：</span>
-                                    <span v-if="!clientDownloads.length" style="color:#888">暂无已发布安装包</span>
-                                    <span v-for="pkg in clientDownloads" :key="pkg.id" style="display:inline-flex;gap:6px;align-items:center">
-                                        <a :href="pkg.url" @click="downloadClient($event,pkg)"
-                                           :target="pkg.hosted||pkg.resolveUrl?'_self':'_blank'" rel="noopener"
-                                           :title="pkg.version+(pkg.size?' · '+sizeFormat(pkg.size):'')">
-                                            [[ clientPlatformName(pkg.platform) ]] [[ pkg.arch ]]
-                                        </a>
-                                        <a v-if="pkg.relayUrl&&!pkg.hosted" :href="pkg.relayUrl" title="服务器中转下载，最多5个并发线程">中转</a>
-                                    </span>
+                                    <a href="#" @click.prevent="openClientDownloads">下载地址</a>
+                                    <a href="#" @click.prevent="openClientGuide">使用说明</a>
                                 </div>
                             </a-col>
                             {{end}}
@@ -135,6 +131,35 @@
             </a-spin>
         </a-layout-content>
     </a-layout>
+    {{if eq .role "manager"}}
+    <a-modal v-model="clientGuideVisible" title="使用说明" :footer="null" :width="760"
+             :body-style="{maxHeight:'65vh',overflowY:'auto'}">
+        <a-spin :spinning="clientGuideLoading" tip="正在读取使用说明">
+            <div style="min-height:70px">
+                <a-alert v-if="clientGuideError" type="error" :message="clientGuideError" show-icon></a-alert>
+                <p v-else-if="!clientGuideLoading&&!clientGuideHTML" style="color:#888">管理员暂未设置使用说明</p>
+                <div v-else class="client-guide-content" v-html="clientGuideHTML"></div>
+            </div>
+        </a-spin>
+    </a-modal>
+    <a-modal v-model="clientDownloadsVisible" title="客户端下载" :footer="null" :width="520"
+             :body-style="{maxHeight:'65vh',overflowY:'auto'}">
+        <a-spin :spinning="clientDownloadsLoading" tip="正在读取下载地址">
+            <div style="min-height:70px">
+                <a-alert v-if="clientDownloadsError" type="error" :message="clientDownloadsError" show-icon></a-alert>
+                <p v-else-if="!clientDownloadsLoading&&!clientDownloads.length" style="color:#888">暂无可下载的安装包</p>
+                <div v-for="pkg in clientDownloads" :key="pkg.id" class="client-download-item">
+                    <div><strong>[[ clientPlatformName(pkg.platform) ]] [[ pkg.arch ]]</strong><span v-if="pkg.version"> · [[ pkg.version ]]</span></div>
+                    <div style="color:#888;margin:4px 0">[[ pkg.filename ]]<span v-if="pkg.size"> · [[ sizeFormat(pkg.size) ]]</span></div>
+                    <a :href="pkg.url" @click="downloadClient($event,pkg)"
+                       :target="pkg.hosted||pkg.resolveUrl?'_self':'_blank'" rel="noopener">下载</a>
+                    <a v-if="pkg.relayUrl&&!pkg.hosted" :href="pkg.relayUrl" style="margin-left:12px"
+                       title="服务器中转下载，最多5个并发线程">备用中转</a>
+                </div>
+            </div>
+        </a-spin>
+    </a-modal>
+    {{end}}
     <a-modal v-model="clashSubscriptionVisible" title="生成订阅"
              :footer="null">
         <p>ACL4SSR_Online_Mini 精简版（与 Github 同步） · 默认后端 api.wcc.best</p>
@@ -156,6 +181,7 @@
     </a-modal>
 </a-layout>
 {{template "js" .}}
+{{if eq .role "manager"}}<script src="{{ .base_path }}assets/dompurify/purify.min.js"></script>{{end}}
 <script>
 
     const restricted = {{ .restricted }};
@@ -214,6 +240,13 @@
         data: {
             siderDrawer,
             clientDownloads: [],
+            clientDownloadsVisible: false,
+            clientDownloadsLoading: false,
+            clientDownloadsError: '',
+            clientGuideVisible: false,
+            clientGuideLoading: false,
+            clientGuideError: '',
+            clientGuideHTML: '',
             restricted,
             role,
             canEditInbound: {{ .canEditInbound }},
@@ -243,9 +276,34 @@
                     window.location.assign(data.url);
                 } catch(e) {this.$message.error(e.message);}
             },
-            async loadClientDownloads() {
-                const rows=await HttpUtil.get('api/client/v1/downloads');
-                if(Array.isArray(rows))this.clientDownloads=rows;
+            async openClientDownloads() {
+                this.clientDownloadsVisible=true;
+                if(this.clientDownloadsLoading)return;
+                this.clientDownloads=[];
+                this.clientDownloadsError='';
+                this.clientDownloadsLoading=true;
+                try {
+                    const response=await fetch('{{ .base_path }}api/client/v1/downloads',{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});
+                    const rows=await response.json();
+                    if(!response.ok||response.headers.get('X-Client-Release-Error'))throw new Error(rows.error||'读取客户端下载列表失败，请稍后重试');
+                    if(!Array.isArray(rows))throw new Error(rows.msg||'客户端下载列表格式错误');
+                    this.clientDownloads=rows;
+                }catch(e){this.clientDownloadsError=e.message||'读取客户端下载列表失败，请稍后重试';this.$message.error(this.clientDownloadsError);}
+                finally{this.clientDownloadsLoading=false;}
+            },
+            async openClientGuide() {
+                this.clientGuideVisible=true;
+                if(this.clientGuideLoading)return;
+                this.clientGuideHTML='';
+                this.clientGuideError='';
+                this.clientGuideLoading=true;
+                try {
+                    const response=await fetch('{{ .base_path }}api/client/v1/guide',{credentials:'same-origin',headers:{'X-Requested-With':'XMLHttpRequest'}});
+                    const guide=await response.json();
+                    if(!response.ok||typeof guide.html!=='string')throw new Error(guide.error||guide.msg||'读取使用说明失败，请稍后重试');
+                    this.clientGuideHTML=DOMPurify.sanitize(guide.html,{USE_PROFILES:{html:true},FORBID_TAGS:['script','style','iframe','object','embed','form','svg','math'],FORBID_ATTR:['id','name','srcset']});
+                }catch(e){this.clientGuideError=e.message||'读取使用说明失败，请稍后重试';}
+                finally{this.clientGuideLoading=false;}
             },
             loading(spinning=true) {
                 this.spinning = spinning;
@@ -499,7 +557,6 @@
         },
         mounted() {
             this.getDBInbounds();
-            {{if eq .role "manager"}}this.loadClientDownloads().catch(e=>console.error(e));{{end}}
         },
         beforeDestroy() {
             if (this.clashSubscriptionClipboard) this.clashSubscriptionClipboard.destroy();

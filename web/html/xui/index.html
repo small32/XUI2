@@ -99,9 +99,11 @@
                         <a-card hoverable>
                             网络流量:
                             ↑ [[ sizeFormat(status.netIO.up) ]]/s |
-                            ↓ [[ sizeFormat(status.netIO.down) ]]/s
+                            ↓ [[ sizeFormat(status.netIO.down) ]]/s |
+                            ⬆️ [[ status.monthTraffic.ready ? sizeFormat(status.monthTraffic.sent) : '采集中' ]] |
+                            ⬇️ [[ status.monthTraffic.ready ? sizeFormat(status.monthTraffic.recv) : '采集中' ]]
                             <a-tooltip>
-                                <template slot="title">显示服务器非回环网卡的实时上传、下载速度，包括本机代理流量。</template>
+                                <template slot="title">显示实时上传、下载速度和本月累计上传、下载量。按服务器非回环网卡统计，包括本机代理流量；每 10 秒累计，重启保留，按上海时区切换月份；首次启用前的历史用量无法追溯。</template>
                                 <a-icon type="info-circle" style="color:#888"></a-icon>
                             </a-tooltip>
                         </a-card>
@@ -184,6 +186,7 @@
             this.mem = new CurTotal(0, 0);
             this.netIO = {up: 0, down: 0};
             this.netTraffic = {sent: 0, recv: 0};
+            this.monthTraffic = {month: '', sent: 0, recv: 0, ready: false};
             this.swap = new CurTotal(0, 0);
             this.tcpCount = 0;
             this.udpCount = 0;
@@ -199,6 +202,7 @@
             this.mem = new CurTotal(data.mem.current, data.mem.total);
             this.netIO = data.netIO;
             this.netTraffic = data.netTraffic;
+            this.monthTraffic = data.monthTraffic || {month: '', sent: 0, recv: 0, ready: false};
             this.swap = new CurTotal(data.swap.current, data.swap.total);
             this.tcpCount = data.tcpCount;
             this.udpCount = data.udpCount;

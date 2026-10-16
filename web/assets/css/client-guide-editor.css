@@ -1,0 +1,18 @@
+.client-guide-editor { border:1px solid #d9d9d9; border-radius:4px; background:#fff; }
+.client-guide-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:10px; background:#fafafa; border-bottom:1px solid #d9d9d9; }
+.client-guide-toolbar button,.client-guide-toolbar select { min-height:28px; padding:2px 8px; border:1px solid #d9d9d9; border-radius:3px; background:#fff; cursor:pointer; color:#333; }
+.client-guide-toolbar button:disabled,.client-guide-toolbar select:disabled { color:#aaa; cursor:not-allowed; }
+.client-guide-toolbar button.is-active { border-color:#1890ff; color:#1890ff; }
+.client-guide-toolbar input[type=color] { width:30px; height:28px; padding:2px; border:1px solid #d9d9d9; background:#fff; cursor:pointer; }
+.client-guide-toolbar label { display:inline-flex; align-items:center; gap:4px; margin:0; font-weight:normal; }
+.client-guide-toolbar .client-guide-mode { margin-left:auto; display:flex; gap:4px; }
+.client-guide-editor-body,.client-guide-source,.client-guide-preview { min-height:320px; max-height:65vh; overflow:auto; padding:16px; width:100%; }
+.client-guide-editor-body { outline:none; overflow-wrap:anywhere; }
+.client-guide-editor-body:empty:before { content:attr(data-placeholder); color:#aaa; pointer-events:none; }
+.client-guide-editor-body[contenteditable=false] { background:#fafafa; }
+.client-guide-source { display:block; resize:vertical; border:0; outline:none; font:13px/1.6 Consolas,monospace; white-space:pre; }
+.client-guide-preview:empty:before { content:'暂无内容'; color:#aaa; }
+.client-guide-insert-row { margin-bottom:12px; }
+.client-guide-insert-row label { display:block; margin-bottom:6px; }
+.client-guide-insert-row input[type=file] { max-width:100%; }
+@media(max-width:600px) { .client-guide-toolbar .client-guide-mode { width:100%; margin-left:0; } .client-guide-editor-body,.client-guide-source,.client-guide-preview { min-height:260px; padding:12px; } }

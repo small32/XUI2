@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 {{template "head" .}}
+{{if eq .role "manager"}}<link rel="stylesheet" href="{{ .base_path }}assets/css/client-guide.css?{{ .cur_ver }}">
+<link rel="stylesheet" href="{{ .base_path }}assets/css/client-guide-editor.css?{{ .cur_ver }}">{{end}}
 <style>
     @media (min-width: 769px) {
         .ant-layout-content {
@@ -148,6 +150,20 @@
                                 <setting-list-item type="textarea" title="xray 配置模版" desc="以该模版为基础生成最终的 xray 配置文件，重启面板生效" v-model="allSetting.xrayTemplateConfig"></setting-list-item>
                             </a-list>
                         </a-tab-pane>
+
+                        {{if eq .role "manager"}}
+                        <a-tab-pane key="6" tab="使用说明">
+                            <div style="background:white;padding:20px">
+                                <p>编辑文字、插入图片或切换 HTML 源码，保存后立即更新入站列表中的使用说明。</p>
+                                <a-spin :spinning="clientGuideLoading">
+                                    <client-guide-editor v-model="clientGuide.html" :disabled="clientGuideLoading||clientGuideSaving" @busy="clientGuideBusy=$event"></client-guide-editor>
+                                </a-spin>
+                                <p style="margin-top:12px">图片支持 PNG、JPG、GIF、WebP，每张最大 5MiB；说明整体最大 20MiB。</p>
+                                <p v-if="clientGuide.updatedAt">最近保存：[[new Date(clientGuide.updatedAt*1000).toLocaleString()]]</p>
+                                <a-button type="primary" :loading="clientGuideSaving" :disabled="clientGuideLoading||clientGuideBusy" @click="saveClientGuide">保存使用说明</a-button>
+                            </div>
+                        </a-tab-pane>
+                        {{end}}
                         
                         <a-tab-pane key="5" tab="其他设置">
                             <a-list item-layout="horizontal" style="background: white">
@@ -161,6 +177,10 @@
     </a-layout>
 </a-layout>
 {{template "js" .}}
+{{if eq .role "manager"}}
+<script src="{{ .base_path }}assets/dompurify/purify.min.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/client-guide-editor.js?{{ .cur_ver }}"></script>
+{{end}}
 {{template "component/setting"}}
 <script>
 
@@ -184,11 +204,29 @@
             clientGitHubChecking: false,
             clientGitHubRelease: null,
             clientDefaultAddress: new URL('{{ .base_path }}',location.origin).href,
+            clientGuide: {html:'',updatedAt:0},
+            clientGuideLoading: false,
+            clientGuideSaving: false,
+            clientGuideBusy: false,
         },
         computed: {
             clientServerAddress() { return (this.clientSettings.publicUrl||this.clientDefaultAddress).replace(/\/+$/,'')+'/'; }
         },
         methods: {
+            async loadClientGuide() {
+                this.clientGuideLoading=true;
+                try {this.clientGuide={html:'',updatedAt:0,...(await this.clientAdminRequest('guide')).obj};}
+                catch(e){this.$message.error(e.message);}
+                finally{this.clientGuideLoading=false;}
+            },
+            async saveClientGuide() {
+                if(this.clientGuideLoading||this.clientGuideSaving||this.clientGuideBusy)return;
+                if(new Blob([this.clientGuide.html]).size>20*1024*1024){this.$message.error('使用说明整体不能超过 20MiB，请减少图片或内容');return;}
+                this.clientGuideSaving=true;
+                try {this.clientGuide={html:'',updatedAt:0,...(await this.clientAdminRequest('guide/update',{html:this.clientGuide.html})).obj};this.$message.success('使用说明已保存，立即生效');}
+                catch(e){this.$message.error(e.message);}
+                finally{this.clientGuideSaving=false;}
+            },
             async clientAdminRequest(path,body) {
                 const response=await fetch('{{ .base_path }}xui/client/'+path,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},body:JSON.stringify(body||{})});
                 const msg=await response.json();if(!msg.success)throw new Error(msg.msg||'操作失败');return msg;
@@ -323,6 +361,7 @@
             await this.loadConnInfo();
             {{if eq .role "manager"}}
             await this.loadClientSettings();
+            await this.loadClientGuide();
             const callbackURL=new URL(location.href);
             if(callbackURL.searchParams.get('github')==='connected'){
                 if(this.clientGitHubStatus.connected){

@@ -290,10 +290,14 @@ func openClientGitHubAsset(ctx context.Context, client *http.Client, apiBase, re
 		request.Header.Set("Authorization", "Bearer "+token)
 	}
 	if len(downloadRange) > 0 {
-		request.Header.Set("Range", downloadRange[0])
+		if value := strings.TrimSpace(downloadRange[0]); value != "" {
+			request.Header.Set("Range", value)
+		}
 	}
 	if len(downloadRange) > 1 {
-		request.Header.Set("If-Range", downloadRange[1])
+		if value := strings.TrimSpace(downloadRange[1]); value != "" {
+			request.Header.Set("If-Range", value)
+		}
 	}
 	response, err := client.Do(request)
 	if err != nil {
