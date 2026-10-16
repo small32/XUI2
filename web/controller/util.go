@@ -81,6 +81,11 @@ func html(c *gin.Context, name string, title string, data gin.H) {
 	data["base_path"] = c.GetString("base_path")
 	data["restricted"] = session.IsRestricted(c)
 	data["role"] = config.Role()
+	// Same-version rebuilds must fetch updated scripts instead of reusing the
+	// previous release's year-long browser cache.
+	if assetVersion := c.GetString("asset_version"); assetVersion != "" {
+		data["cur_ver"] = config.GetVersion() + "-" + assetVersion
+	}
 	// 把当前请求的 localizer 注入模板：每个请求有自己独立的翻译器，
 	// 避免多个并发请求共享同一变量的数据竞争与语言串台。
 	data["i18n"] = i18nFunc(c)

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"embed"
+	"fmt"
 	"html/template"
 	"io"
 	"io/fs"
@@ -43,6 +44,30 @@ var htmlFS embed.FS
 var i18nFS embed.FS
 
 var startTime = time.Now()
+
+func assetCacheVersion(files fs.FS) (string, error) {
+	digest := sha256.New()
+	err := fs.WalkDir(files, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		data, err := fs.ReadFile(files, path)
+		if err != nil {
+			return err
+		}
+		io.WriteString(digest, path)
+		digest.Write([]byte{0})
+		digest.Write(data)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", digest.Sum(nil)[:8]), nil
+}
 
 type wrapAssetsFS struct {
 	embed.FS
@@ -169,12 +194,17 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 		return nil, err
 	}
 	assetsBasePath := basePath + "assets/"
+	assetVersion, err := assetCacheVersion(assetsFS)
+	if err != nil {
+		return nil, err
+	}
 
 	store := newSessionStore(secret)
 	engine.Use(sessions.Sessions("session", store))
 	engine.Use(secureSessionCookies)
 	engine.Use(func(c *gin.Context) {
 		c.Set("base_path", basePath)
+		c.Set("asset_version", assetVersion)
 	})
 	engine.Use(func(c *gin.Context) {
 		uri := c.Request.RequestURI
