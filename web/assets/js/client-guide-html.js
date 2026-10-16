@@ -92,5 +92,14 @@
         return true;
     }
 
-    window.ClientGuideHTML = {sanitize, linkURL, handleAnchorClick};
+    function imageFromClick(event, container) {
+        const element = event.target && (event.target.nodeType === 1 ? event.target : event.target.parentElement);
+        const image = element && element.closest('img');
+        if (!image || !container || !container.contains(image)) return null;
+        const src = image.getAttribute('src') || '';
+        if (!httpURL(src) && !/^data:image\/(?:png|jpeg|jpg|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(src)) return null;
+        return {src, alt:image.getAttribute('alt') || '说明图片'};
+    }
+
+    window.ClientGuideHTML = {sanitize, linkURL, handleAnchorClick, imageFromClick};
 })();

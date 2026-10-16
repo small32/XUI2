@@ -26,7 +26,7 @@
             disabled: {type:Boolean, default:false}
         },
         data() {
-            return {mode:'visual', sourceHTML:'', previewHTML:'', imageBusy:false, imageDialog:false, imageURL:'', linkDialog:false, linkURL:'', linkText:'', color:'#333333'};
+            return {mode:'visual', sourceHTML:'', previewHTML:'', imagePreviewVisible:false, previewImage:{src:'',alt:''}, imageBusy:false, imageDialog:false, imageURL:'', linkDialog:false, linkURL:'', linkText:'', color:'#333333'};
         },
         computed: {
             formattingDisabled() { return this.disabled || this.imageBusy || this.mode !== 'visual'; }
@@ -61,7 +61,8 @@
                 </div>
                 <div v-show="mode==='visual'" ref="editor" class="client-guide-editor-body client-guide-content" :contenteditable="disabled||imageBusy?'false':'true'" role="textbox" aria-label="使用说明正文" aria-multiline="true" data-placeholder="在这里编写使用说明，可插入图片、链接和格式化文字……" @input="visualInput" @keyup="rememberSelection" @mouseup="rememberSelection" @blur="rememberSelection" @paste="pasteContent" @drop="dropContent" @dragover.prevent></div>
                 <textarea v-if="mode==='source'" class="client-guide-source" :value="sourceHTML" :disabled="disabled" aria-label="使用说明 HTML 源码" spellcheck="false" @input="sourceInput($event.target.value)"></textarea>
-                <div v-if="mode==='preview'" class="client-guide-preview client-guide-content" @click="handleAnchorClick" v-html="previewHTML"></div>
+                <div v-if="mode==='preview'" class="client-guide-preview client-guide-content client-guide-image-clickable" @click="handlePreviewClick" v-html="previewHTML"></div>
+                <client-guide-image-preview :visible="imagePreviewVisible" :src="previewImage.src" :alt="previewImage.alt" @close="imagePreviewVisible=false"></client-guide-image-preview>
                 <a-modal v-model="linkDialog" title="插入链接" :footer="null" :width="460">
                     <div class="client-guide-insert-row"><label>链接地址（HTTP / HTTPS 或文内锚点）</label><a-input v-model.trim="linkURL" placeholder="https://example.com/ 或 #install" @pressEnter="insertLink"></a-input></div>
                     <div class="client-guide-insert-row"><label>显示文字</label><a-input v-model="linkText" placeholder="留空使用所选文字或链接地址"></a-input></div>
@@ -94,7 +95,9 @@
             this.savedSelection = null;
         },
         methods: {
-            handleAnchorClick(event) {
+            handlePreviewClick(event) {
+                const image=ClientGuideHTML.imageFromClick(event,event.currentTarget);
+                if(image){event.preventDefault();this.previewImage=image;this.imagePreviewVisible=true;return;}
                 ClientGuideHTML.handleAnchorClick(event, event.currentTarget);
             },
             rememberSelection() {

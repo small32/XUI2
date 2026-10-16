@@ -140,10 +140,12 @@
             <div style="min-height:70px">
                 <a-alert v-if="clientGuideError" type="error" :message="clientGuideError" show-icon></a-alert>
                 <p v-else-if="!clientGuideLoading&&!clientGuideHTML" style="color:#888">管理员暂未设置使用说明</p>
-                <div v-else class="client-guide-content" @click="handleGuideAnchorClick" v-html="clientGuideHTML"></div>
+                <div v-else class="client-guide-content client-guide-image-clickable" @click="handleGuideContentClick" v-html="clientGuideHTML"></div>
             </div>
         </a-spin>
     </a-modal>
+    <client-guide-image-preview :visible="clientGuideImageVisible" :src="clientGuideImage.src" :alt="clientGuideImage.alt"
+                                @close="clientGuideImageVisible=false"></client-guide-image-preview>
     <a-modal v-model="clientDownloadsVisible" title="客户端下载" :footer="null" :width="520"
              :body-style="{maxHeight:'65vh',overflowY:'auto'}">
         <a-spin :spinning="clientDownloadsLoading" tip="正在读取下载地址">
@@ -188,7 +190,8 @@
 </a-layout>
 {{template "js" .}}
 {{if eq .role "manager"}}<script src="{{ .base_path }}assets/dompurify/purify.min.js"></script>
-<script src="{{ .base_path }}assets/js/client-guide-html.js?{{ .cur_ver }}"></script>{{end}}
+<script src="{{ .base_path }}assets/js/client-guide-html.js?{{ .cur_ver }}"></script>
+<script src="{{ .base_path }}assets/js/client-guide-image-preview.js?{{ .cur_ver }}"></script>{{end}}
 <script>
 
     const restricted = {{ .restricted }};
@@ -254,6 +257,8 @@
             clientGuideLoading: false,
             clientGuideError: '',
             clientGuideHTML: '',
+            clientGuideImageVisible: false,
+            clientGuideImage: {src:'',alt:''},
             restricted,
             role,
             canEditInbound: {{ .canEditInbound }},
@@ -312,7 +317,9 @@
                 }catch(e){this.clientGuideError=e.message||'读取使用说明失败，请稍后重试';}
                 finally{this.clientGuideLoading=false;}
             },
-            handleGuideAnchorClick(event) {
+            handleGuideContentClick(event) {
+                const image=ClientGuideHTML.imageFromClick(event,event.currentTarget);
+                if(image){event.preventDefault();this.clientGuideImage=image;this.clientGuideImageVisible=true;return;}
                 ClientGuideHTML.handleAnchorClick(event,event.currentTarget);
             },
             loading(spinning=true) {
