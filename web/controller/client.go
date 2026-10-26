@@ -46,6 +46,8 @@ func RegisterClientAPI(g *gin.RouterGroup) {
 	private.Use(a.authenticate)
 	private.POST("/auth/logout", a.logout)
 	private.GET("/account", a.account)
+	private.GET("/announcements", a.announcements)
+	private.POST("/announcements/read", a.announcementsRead)
 	private.GET("/subscription/clash", a.subscription)
 }
 func RegisterClientAdmin(g *gin.RouterGroup) {
@@ -138,6 +140,34 @@ func (a *ClientController) account(c *gin.Context) {
 		return
 	}
 	c.JSON(200, v)
+}
+// announcements 返回投放给客户端的通知公告。SClash 在账号轮询时一并拉取，
+// 按 id + 内容时间戳去重后以系统通知展示。旧版面板没有该接口时客户端按 404 忽略。
+func (a *ClientController) announcements(c *gin.Context) {
+	feed, err := new(service.AnnouncementService).ClientFeed()
+	if err != nil {
+		clientError(c, 500, err)
+		return
+	}
+	c.Header("ETag", fmt.Sprintf("\"%s\"", feed.Version))
+	c.JSON(200, feed)
+}
+// announcementsRead 记录客户端已送达/已读的公告，用于管理端查看触达情况。
+// 客户端只需在拿到公告后上报一次；重复上报按首次时间保留，不会产生重复记录。
+func (a *ClientController) announcementsRead(c *gin.Context) {
+	var input struct {
+		Ids []int `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		clientError(c, 400, err)
+		return
+	}
+	in := clientInbound(c)
+	if err := new(service.AnnouncementService).MarkRead(service.ClientPortActor(in.Port), service.AnnouncementAudienceClient, input.Ids); err != nil {
+		clientError(c, 500, err)
+		return
+	}
+	c.JSON(200, gin.H{"success": true})
 }
 func (a *ClientController) subscription(c *gin.Context) {
 	in := clientInbound(c)

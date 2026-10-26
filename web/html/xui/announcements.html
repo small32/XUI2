@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+{{template "head" .}}
+<style>
+    .ann-list {
+        background: #fff;
+    }
+
+    .ann-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 14px 16px;
+        border-bottom: 1px solid #f0f0f0;
+    }
+
+    .ann-item:last-child {
+        border-bottom: none;
+    }
+
+    .ann-main {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .ann-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: rgba(0, 0, 0, .85);
+        word-break: break-word;
+        line-height: 1.5;
+    }
+
+    .ann-meta {
+        margin-top: 4px;
+        font-size: 12px;
+        color: rgba(0, 0, 0, .45);
+    }
+
+    .ann-preview {
+        margin-top: 6px;
+        color: rgba(0, 0, 0, .65);
+        line-height: 1.6;
+        word-break: break-word;
+    }
+
+    .ann-detail-body {
+        margin-top: 12px;
+        color: rgba(0, 0, 0, .65);
+        line-height: 1.75;
+        word-break: break-word;
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+</style>
+<body>
+<script>window.__xuiAnnouncementPage = true;</script>
+<a-layout id="app" v-cloak>
+    {{template "commonSider" .}}
+    <a-layout id="content-layout">
+        <a-layout-content>
+            <a-spin :spinning="loading" :delay="200">
+                <a-card :bordered="false">
+                    <template slot="title">
+                        通知公告
+                        <span style="font-weight:400;font-size:12px;color:rgba(0,0,0,.45);margin-left:8px">共 [[ total ]] 条</span>
+                    </template>
+                    <template slot="extra">
+                        <a-button size="small" :loading="loading" @click="load(page)">刷新</a-button>
+                    </template>
+                    <a-empty v-if="!loading && items.length === 0" description="暂无公告"></a-empty>
+                    <div class="ann-list">
+                        <div class="ann-item" v-for="item in items" :key="item.id">
+                            <div class="ann-main">
+                                <div class="ann-title">
+                                    <a-tag v-if="isUnread(item)" color="red">未读</a-tag>
+                                    <a-tag :color="levelOf(item.level).color">[[ levelOf(item.level).text ]]</a-tag>
+                                    [[ item.title ]]
+                                </div>
+                                <div class="ann-meta">
+                                    [[ formatTime(item.createdAt) ]]
+                                    <span v-if="isExpired(item)"> · 已过期</span>
+                                </div>
+                                <div class="ann-preview">[[ preview(item.content) ]]</div>
+                            </div>
+                            <a-button size="small" @click="open(item)">查看</a-button>
+                        </div>
+                    </div>
+                    <div v-if="total > size" style="text-align:right;margin-top:16px">
+                        <a-pagination :current="page" :page-size="size" :total="total"
+                                      :show-total="t => '共 ' + t + ' 条'"
+                                      @change="load"></a-pagination>
+                    </div>
+                </a-card>
+            </a-spin>
+        </a-layout-content>
+    </a-layout>
+    <a-modal :visible="detail.visible" :title="detail.item.title" :width="640" :footer="null"
+             @cancel="detail.visible=false">
+        <div>
+            <a-tag :color="levelOf(detail.item.level).color">[[ levelOf(detail.item.level).text ]]</a-tag>
+            <a-tag v-if="isExpired(detail.item)">已过期</a-tag>
+            <span class="ann-meta">[[ formatTime(detail.item.createdAt) ]]</span>
+        </div>
+        <div class="ann-detail-body" v-html="body(detail.item.content)"></div>
+    </a-modal>
+</a-layout>
+{{template "js" .}}
+<script>
+    const AN = window.XuiAnnouncement;
+
+    const app = new Vue({
+        delimiters: ['[[', ']]'],
+        el: '#app',
+        data: {
+            siderDrawer,
+            loading: false,
+            items: [],
+            total: 0,
+            page: 1,
+            size: 20,
+            detail: {visible: false, item: {}},
+        },
+        methods: {
+            levelOf: AN.levelOf,
+            body: AN.contentHtml,
+            formatTime: AN.formatTime,
+            isUnread: AN.isUnread,
+            isExpired(item) {
+                return !!(item && item.expireAt && item.expireAt * 1000 <= Date.now());
+            },
+            preview(content) {
+                const text = String(content || '').replace(/\s+/g, ' ').trim();
+                return text.length > 120 ? text.slice(0, 120) + '…' : text;
+            },
+            async load(page) {
+                const target = Number(page) || 1;
+                this.loading = true;
+                try {
+                    const resp = await axios.get(basePath + 'xui/announcement/history', {
+                        params: {page: target, size: this.size},
+                        timeout: 8000,
+                    });
+                    const data = resp.data;
+                    if (!data || !data.success) {
+                        throw new Error((data && data.msg) || '读取公告失败');
+                    }
+                    this.items = (data.obj && data.obj.items) || [];
+                    this.total = (data.obj && data.obj.total) || 0;
+                    this.page = (data.obj && data.obj.page) || target;
+                } catch (e) {
+                    this.$message.error(e.message || '读取公告失败');
+                } finally {
+                    this.loading = false;
+                }
+            },
+            open(item) {
+                this.detail = {visible: true, item: item};
+                // 打开详情即视为已读：本地去重 + 服务端触达记录。
+                AN.markRead([item]);
+                this.items = this.items.slice();
+            },
+        },
+        mounted() {
+            this.load(1);
+        },
+    });
+</script>
+</body>
+</html>

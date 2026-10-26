@@ -33,16 +33,18 @@ func (a *XUIController) initRouter(g *gin.RouterGroup) {
 	g.GET("/", a.index)
 	g.GET("/inbounds", a.inbounds)
 	g.GET("/setting", a.setting)
+	g.GET("/announcements", a.announcementPage)
 
 	a.serverManagementController = NewServerManagementController(g)
 	a.inboundController = NewInboundController(g, a.serverManagementController)
 	a.settingController = NewSettingController(g)
+	NewAnnouncementController(g)
 	RegisterClientAdmin(g)
 }
 
 // checkRestricted 受限登录（入站端口号登录）仅可访问入站列表页、入站列表数据、其订阅数据，
-// 以及流量汇总页、本入站的流量汇总数据与本入站的月度留档，其余请求一律拦截，
-// 避免仅靠前端隐藏菜单造成的越权。
+// 流量汇总页、本入站的流量汇总数据与本入站的月度留档，以及通知公告页与公告数据，
+// 其余请求一律拦截，避免仅靠前端隐藏菜单造成的越权。
 func (a *XUIController) checkRestricted(c *gin.Context) {
 	if !session.IsRestricted(c) {
 		c.Next()
@@ -56,7 +58,9 @@ func (a *XUIController) checkRestricted(c *gin.Context) {
 		c.Abort()
 		return
 	case "xui/inbounds", "xui/inbound/list", "xui/inbound/subscription",
-		"xui/traffic-summary", "xui/traffic-summary/list", "xui/traffic-summary/snapshots":
+		"xui/traffic-summary", "xui/traffic-summary/list", "xui/traffic-summary/snapshots",
+		"xui/announcements", "xui/announcement/active", "xui/announcement/history",
+		"xui/announcement/read":
 		c.Next()
 		return
 	}
@@ -89,4 +93,9 @@ func (a *XUIController) inbounds(c *gin.Context) {
 func (a *XUIController) setting(c *gin.Context) {
 	user := session.GetLoginUser(c)
 	html(c, "setting.html", "设置", gin.H{"canEditAdmin": user != nil && user.Username == model.AdminUsername})
+}
+
+// announcementPage 是面板用户查看历史公告的页面，管理员与端口账号都可访问。
+func (a *XUIController) announcementPage(c *gin.Context) {
+	html(c, "announcements.html", "通知公告", nil)
 }

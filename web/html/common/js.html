@@ -18,4 +18,5 @@
     const basePath = '{{ .base_path }}';
     axios.defaults.baseURL = basePath;
 </script>
+<script src="{{ .base_path }}assets/js/announcement.js?{{ .cur_ver }}"></script>
 {{end}}

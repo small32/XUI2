@@ -131,6 +131,10 @@ func initTrafficSnapshot() error {
 	return db.AutoMigrate(&model.TrafficSnapshot{})
 }
 
+func initAnnouncement() error {
+	return db.AutoMigrate(&model.Announcement{}, &model.AnnouncementReceipt{})
+}
+
 func initManagement() error {
 	if err := db.AutoMigrate(&model.ManagedNode{}, &model.NodeTraffic{}, &model.SyncTask{}, &model.AgentOperation{}, &model.AgentMonthlySnapshot{}, &model.NodeTrafficSnapshot{}, &model.HostNetworkMonth{}); err != nil {
 		return err
@@ -187,6 +191,9 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	if err = initManagement(); err != nil {
+		return err
+	}
+	if err = initAnnouncement(); err != nil {
 		return err
 	}
 

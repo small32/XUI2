@@ -96,7 +96,7 @@ go build ./...
 bash -n install.sh
 ```
 
-Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.3.2`；提交到 `main` 不会自动发布 Release。
+Release 工作流仅在推送版本标签或手动触发时运行。`config/version` 当前为 `0.3.3`；提交到 `main` 不会自动发布 Release。
 
 流量汇总的节点明细同时显示流量倍率、实际用量与计费用量（原“用量”）；上传、下载为节点原始计数。共享额度及自动超限停用按各节点倍率后的用量之和计算，超限后向所有下发节点发送停用配置。
 
@@ -118,6 +118,8 @@ Release 工作流仅在推送版本标签或手动触发时运行。`config/vers
 | POST | `api/client/v1/auth/refresh` | 刷新令牌 | JSON `{"refreshToken":"..."}`，旋转访问和刷新令牌 |
 | POST | `api/client/v1/auth/logout` | Bearer | 注销当前会话 |
 | GET | `api/client/v1/account` | Bearer | 当前账号账单、状态和订阅配置版本 |
+| GET | `api/client/v1/announcements` | Bearer | 投放给客户端的通知公告与内容版本号 |
+| POST | `api/client/v1/announcements/read` | Bearer | 上报已送达/已读的公告编号，供管理端统计触达 |
 | GET | `api/client/v1/subscription/clash` | Bearer | 直接返回 Clash/Mihomo YAML，不使用第三方转换器 |
 | GET | `api/client/v1/downloads` | Bearer 或有效面板登录 | GitHub 最新正式版的客户端安装包列表 |
 | GET / HEAD | `api/client/v1/release-downloads/:assetID` | Bearer 或有效面板登录 | GitHub Release 安装包直连或中转下载 |
@@ -133,6 +135,24 @@ Release 工作流仅在推送版本标签或手动触发时运行。`config/vers
 订阅从管理端保存的配置生成，只包含当前启用、且被账号选择下发的节点，支持各节点不同协议。节点离线不影响已保存配置生成。支持 Shadowsocks、Trojan、VMess、VLESS、HTTP、SOCKS，以及适用协议的 TCP、WebSocket、gRPC、HTTP/2 和 TLS；暂不转换 Reality、旧 XTLS、KCP、QUIC、TCP HTTP 伪装及不兼容的组合，返回明确错误。订阅提供 `Subscription-Userinfo`（计费用量）、`Profile-Update-Interval` 与 ETag；`configVersion` 是实际订阅内容的 SHA256。
 
 配置默认 `mode: rule`、`ipv6: false`、DNS IPv6 关闭、`tun.enable: false`、`tun.stack: mixed`，配置管理端直连规则、内网直连、中国 IP 直连及其他流量走节点选择组。系统代理、自启、静默启动及用户选择的规则／直连／全局模式由后续客户端实现和保存；订阅更新不应覆盖用户选择。
+
+### 通知公告
+
+管理员在“面板设置 → 通知公告”中维护公告，可按范围分别投递：`panel`（面板登录用户，含端口账号受限登录）、`client`（SClash 客户端）、`all`（两边都投递）。每条公告可设置级别（通知／提醒／重要）、是否置顶、是否启用和过期时间；过期时间为空表示长期有效，停用或已过期的公告不投递。
+
+公告内容只保存纯文本，换行保留，`http(s)` 链接在面板弹窗中可点击。标题最长 100 字，内容最长 4000 字——弹窗与系统通知都只适合短文本，长内容仍应使用“使用说明”。
+
+登录后弹窗：进入任意面板页面时前端读取 `xui/announcement/active`（管理员与端口账号均可读，受限登录已加入白名单），只提示当前浏览器尚未看过的公告；关闭弹窗后按公告编号与内容时间戳记入 `localStorage`，管理员之后修改同一条公告会再次提示。弹窗是纯文本渲染，先转义再识别链接，不解析 HTML。
+
+历史公告页：侧栏“通知公告”对所有登录用户开放（管理员与端口账号都有入口），分页列出启用中的面板公告，已过期的保留为历史记录；管理员停用等于撤回，不再出现在用户侧。点击“查看”打开详情即记为已读。弹窗底部也提供“查看全部公告”跳转。
+
+管理端表格列出全部公告（含已过期、已停用），支持按状态筛选、按标题搜索和分页；“已读”列显示触达人数，点“记录”可查看具体账号、渠道与首次阅读时间。
+
+已读记录：面板关闭弹窗或打开详情时上报到 `xui/announcement/read`（JSON `{"ids":[1,2]}`），SClash 拉取公告后上报到 `api/client/v1/announcements/read`。账号标识固定为 `panel:user:<id>`、`panel:port:<端口>`、`client:port:<端口>`，同一公告对同一账号只保留首次阅读时间，(公告编号, 账号) 上有唯一索引兜底，重复上报不会产生重复行。
+
+客户端推送：`api/client/v1/announcements` 返回 `{"version":"...","announcements":[{"id","title","content","level","pinned","updatedAt"}]}`，时间字段为 Unix 秒，响应带 `ETag`。`version` 由可见公告的 `id:updatedAt` 排序后哈希得到；内容不变时版本号稳定，同一秒内的连续修改也会推进 `updatedAt`。SClash 在账号轮询中一并拉取该接口，按 `id` + `updatedAt` 去重后以系统通知展示，并在账号栏显示公告横幅，点击可查看全文；对接旧版面板时该接口返回 404，客户端静默跳过，不影响账号刷新与代理。
+
+管理接口仅管理员可用（`xui/announcement/list`、`save`、`delete`、`receipts`），受限登录访问一律拦截。
 
 ### GitHub 客户端安装包分发
 
