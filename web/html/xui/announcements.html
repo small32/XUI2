@@ -156,7 +156,7 @@
             },
             open(item) {
                 this.detail = {visible: true, item: item};
-                // 打开详情即视为已读：本地去重 + 服务端触达记录。
+                // 打开详情即视为已读：标记由服务端按当前账号记录，失败会退回未读。
                 AN.markRead([item]);
                 this.items = this.items.slice();
             },

@@ -3,6 +3,7 @@ package controller
 import (
 	"strconv"
 
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"xui/web/service"
 	"xui/web/session"
@@ -40,7 +41,11 @@ func (a *AnnouncementController) initRouter(g *gin.RouterGroup) {
 // panelActor 返回当前面板登录者的阅读记录标识：
 // 管理员按用户编号，端口账号按端口号，两者互不覆盖。
 // 端口账号查不到入站时返回空（放弃记录），绝不退回用户编号——否则会和真实管理员撞号。
+// 会话中间件缺失时同样返回空：宁可全部按未读提醒，也不能让公告接口 panic。
 func panelActor(c *gin.Context) string {
+	if _, ok := c.Get(sessions.DefaultKey); !ok {
+		return ""
+	}
 	if user := session.GetLoginUser(c); user != nil {
 		return service.PanelUserActor(user.Id)
 	}
@@ -58,7 +63,7 @@ func panelActor(c *gin.Context) string {
 func (a *AnnouncementController) history(c *gin.Context) {
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	size, _ := strconv.Atoi(c.DefaultQuery("size", "20"))
-	value, err := a.service.History(page, size)
+	value, err := a.service.History(page, size, panelActor(c))
 	jsonObj(c, value, err)
 }
 
@@ -95,8 +100,10 @@ func (a *AnnouncementController) receipts(c *gin.Context) {
 	jsonObj(c, rows, err)
 }
 
+// active 返回当前账号可见且尚未确认的公告，未读与否由服务端按阅读记录判定，
+// 不再依赖浏览器本地存储——否则同一台机器上先登录过的账号会把公告"替别人读掉"。
 func (a *AnnouncementController) active(c *gin.Context) {
-	rows, err := a.service.Active(service.AnnouncementAudiencePanel)
+	rows, err := a.service.Active(service.AnnouncementAudiencePanel, panelActor(c))
 	jsonObj(c, rows, err)
 }
 

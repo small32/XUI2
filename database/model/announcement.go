@@ -21,6 +21,10 @@ type Announcement struct {
 	Created  int64  `json:"createdAt" gorm:"column:created_at"`
 	Updated  int64  `json:"updatedAt" gorm:"column:updated_at"`
 
+	// Read 只在给某个账号下发公告时回填，不入库。
+	// 见 AnnouncementService.fillReadState：true 表示该账号读的是当前内容版本。
+	Read bool `json:"read" gorm:"-"`
+
 	// ReadCount 只在管理端列表里回填，不入库。
 	ReadCount int64 `json:"readCount" gorm:"-"`
 }

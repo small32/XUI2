@@ -115,7 +115,11 @@ func (s *AnnouncementService) List() ([]model.Announcement, error) {
 }
 
 // Active 返回指定受众当前可见的公告：已启用、未过期，且受众匹配或为 all。
-func (s *AnnouncementService) Active(audience string) ([]model.Announcement, error) {
+//
+// actor 是当前阅读者的标识（见 panelActor 一类 helper）；非空时回填每条公告的
+// Read 标记，前端据此决定要不要弹窗。传空字符串表示不需要已读状态（如客户端
+// feed 自己去重），此时全部标记为未读。
+func (s *AnnouncementService) Active(audience, actor string) ([]model.Announcement, error) {
 	now := time.Now().Unix()
 	rows := make([]model.Announcement, 0)
 	err := database.GetDB().
@@ -127,7 +131,59 @@ func (s *AnnouncementService) Active(audience string) ([]model.Announcement, err
 		Order("id DESC").
 		Limit(announcementActiveMax).
 		Find(&rows).Error
-	return rows, err
+	if err != nil {
+		return nil, err
+	}
+	if err := fillReadState(rows, actor); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+// fillReadState 按 actor 的阅读记录回填每条公告的 Read 标记。
+//
+// 判定沿用「阅读时间 vs 内容版本」的比较：回执的 read_at 不小于公告 updated_at 才算
+// 已读。公告被编辑后 updated_at 前进，旧回执落后，公告会重新变成未读，用户因此能
+// 看到修订内容；再次确认后 read_at 刷新到当前版本（见 MarkRead）。
+// actor 为空或查不到回执时一律按未读处理——宁可多提醒一次，也不静默吞掉公告。
+func fillReadState(rows []model.Announcement, actor string) error {
+	for i := range rows {
+		rows[i].Read = false
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" || len(rows) == 0 {
+		return nil
+	}
+	ids := make([]int, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.Id)
+	}
+	// 一个账号对同一条公告理论上只有一行回执，取 MAX 是为了在历史数据或并发
+	// 上报下也能得到最新的一次阅读时间。
+	type receiptVersion struct {
+		AnnouncementId int   `gorm:"column:announcement_id"`
+		ReadAt         int64 `gorm:"column:read_at"`
+	}
+	var latest []receiptVersion
+	if err := database.GetDB().
+		Model(&model.AnnouncementReceipt{}).
+		Select("announcement_id, MAX(read_at) AS read_at").
+		Where("actor = ?", actor).
+		Where("announcement_id IN ?", ids).
+		Group("announcement_id").
+		Scan(&latest).Error; err != nil {
+		return err
+	}
+	versions := make(map[int]int64, len(latest))
+	for _, row := range latest {
+		versions[row.AnnouncementId] = row.ReadAt
+	}
+	for i := range rows {
+		if readAt, ok := versions[rows[i].Id]; ok && readAt >= rows[i].Updated {
+			rows[i].Read = true
+		}
+	}
+	return nil
 }
 
 // Save 新建或更新公告。保存后 UpdatedAt 一定变化，客户端据此重新提醒同一公告的修订内容。
@@ -224,8 +280,9 @@ func (s *AnnouncementService) Delete(id int) error {
 }
 
 // ClientFeed 生成下发给 SClash 的公告列表与内容版本号。
+// 客户端按 id + 内容时间戳本地去重，服务端不下发已读状态，避免两边语义耦合。
 func (s *AnnouncementService) ClientFeed() (*ClientAnnouncementFeed, error) {
-	rows, err := s.Active(AnnouncementAudienceClient)
+	rows, err := s.Active(AnnouncementAudienceClient, "")
 	if err != nil {
 		return nil, err
 	}
@@ -306,7 +363,8 @@ func panelHistoryQuery() *gorm.DB {
 }
 
 // History 按发布时间倒序返回面板用户可见的历史公告，分页。
-func (s *AnnouncementService) History(page, size int) (*AnnouncementPage, error) {
+// actor 非空时回填每条的已读标记（历史页的未读红点据此显示）。
+func (s *AnnouncementService) History(page, size int, actor string) (*AnnouncementPage, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -326,10 +384,16 @@ func (s *AnnouncementService) History(page, size int) (*AnnouncementPage, error)
 		Find(&rows).Error; err != nil {
 		return nil, err
 	}
+	if err := fillReadState(rows, actor); err != nil {
+		return nil, err
+	}
 	return &AnnouncementPage{Total: int(total), Page: page, Size: size, Items: rows}, nil
 }
 
-// MarkRead 记录 actor 已读。重复上报由唯一索引忽略，保留首次阅读时间；
+// MarkRead 记录 actor 已读，read_at 同时充当「读到的内容版本」。
+//
+// 同一份内容重复上报保留首次时间；公告被编辑（updated_at 前进）后再次上报则刷新，
+// 使该条重新计入已读。查不到与 channel 受众匹配的公告时不写任何记录。
 // 只接受与 channel 受众匹配的公告，避免把面板公告记到客户端头上。
 func (s *AnnouncementService) MarkRead(actor, channel string, ids []int) error {
 	actor = strings.TrimSpace(actor)
@@ -368,16 +432,69 @@ func (s *AnnouncementService) MarkRead(actor, channel string, ids []int) error {
 		return nil
 	}
 	now := time.Now().Unix()
-	receipts := make([]model.AnnouncementReceipt, 0, len(rows))
+	updated := make(map[int]int64, len(rows))
+	targets := make([]int, 0, len(rows))
 	for _, row := range rows {
-		receipts = append(receipts, model.AnnouncementReceipt{
+		updated[row.Id] = row.Updated
+		targets = append(targets, row.Id)
+	}
+	// 同一秒内连续编辑时 Save 会把 updated_at 人为推到 now 之后，这里同步取大，
+	// 保证「刚读过」一定不小于内容版本，否则这条会被判定成未读而反复提醒。
+	readAtOf := func(id int) int64 {
+		if updated[id] > now {
+			return updated[id]
+		}
+		return now
+	}
+	// 已有回执按内容版本分成两类处理：
+	//   read_at 已跟上公告更新时间 —— 同一份内容重复上报，保留首次时间不写；
+	//   read_at 落后于更新时间     —— 用户读的是旧版本（公告被编辑过），刷新到当前版本，
+	//                                配合 fillReadState 让这条重新变成已读、停止重复提醒。
+	existing := make([]model.AnnouncementReceipt, 0, len(rows))
+	if err := database.GetDB().
+		Where("actor = ?", actor).
+		Where("announcement_id IN ?", targets).
+		Find(&existing).Error; err != nil {
+		return err
+	}
+	known := make(map[int]bool, len(existing))
+	refresh := make([]int, 0, len(existing))
+	for _, row := range existing {
+		if known[row.AnnouncementId] {
+			continue
+		}
+		known[row.AnnouncementId] = true
+		if row.ReadAt >= updated[row.AnnouncementId] {
+			continue
+		}
+		refresh = append(refresh, row.AnnouncementId)
+	}
+	inserts := make([]model.AnnouncementReceipt, 0, len(rows))
+	for _, row := range rows {
+		if known[row.Id] {
+			continue
+		}
+		inserts = append(inserts, model.AnnouncementReceipt{
 			AnnouncementId: row.Id,
 			Actor:          actor,
 			Channel:        channel,
-			ReadAt:         now,
+			ReadAt:         readAtOf(row.Id),
 		})
 	}
-	return database.GetDB().Clauses(clause.OnConflict{DoNothing: true}).Create(&receipts).Error
+	return database.GetDB().Transaction(func(tx *gorm.DB) error {
+		for _, id := range refresh {
+			if err := tx.Model(&model.AnnouncementReceipt{}).
+				Where("actor = ?", actor).
+				Where("announcement_id = ?", id).
+				Update("read_at", readAtOf(id)).Error; err != nil {
+				return err
+			}
+		}
+		if len(inserts) > 0 {
+			return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&inserts).Error
+		}
+		return nil
+	})
 }
 
 // Receipts 返回某条公告的阅读记录，最近的在前。

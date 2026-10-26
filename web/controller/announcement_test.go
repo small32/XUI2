@@ -15,6 +15,7 @@ import (
 	"xui/database"
 	"xui/database/model"
 	"xui/web/service"
+	"xui/web/session"
 )
 
 // 面板公告接口与客户端公告接口的端到端行为：
@@ -237,5 +238,108 @@ func TestAnnouncementHistoryAndReadAPI(t *testing.T) {
 	}
 	if views, err = svc.Receipts(panelRow.Id); err != nil || len(views) != 0 {
 		t.Fatalf("仅面板公告不应有客户端记录: %+v %v", views, err)
+	}
+}
+
+// 同一浏览器、先后以管理员和端口账号登录：管理员确认过的公告不应"替"端口账号读掉。
+// 这是会话切换场景的接口层防线——已读必须挂在账号上，而不是挂在浏览器上。
+func TestAnnouncementReadIsPerLoginAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("XUI_ROLE", "manager")
+	if err := database.InitDB(filepath.Join(t.TempDir(), "announcement-account.db")); err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, _ := database.GetDB().DB()
+	t.Cleanup(func() { sqlDB.Close() })
+
+	in := model.Inbound{Port: 18892, Enable: true, Protocol: model.Shadowsocks, Settings: `{"method":"aes-128-gcm","password":"secret"}`, StreamSettings: `{}`, Sniffing: `{}`, Tag: "inbound-18892", Total: 1000}
+	if err := database.GetDB().Create(&in).Error; err != nil {
+		t.Fatal(err)
+	}
+	admin := model.User{Username: "admin", Password: "hash"}
+	if err := database.GetDB().Create(&admin).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := new(service.AnnouncementService)
+	row, err := svc.Save(&service.AnnouncementInput{Title: "系统维护", Content: "周六维护",
+		Audience: service.AnnouncementAudiencePanel, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	engine := gin.New()
+	engine.Use(func(c *gin.Context) { c.Set("base_path", "/panel/"); c.Next() })
+	// securecookie 的加密 key 必须是 16/24/32 字节，这里取满 32。
+	engine.Use(sessions.Sessions("session", cookie.NewStore(
+		[]byte("announcement-account-secret!!"),
+		[]byte("0123456789abcdef0123456789abcdef"),
+	)))
+	// 测试替身：按请求头决定这次调用代表哪个账号登录，会话本身走真实的读写路径。
+	engine.Use(func(c *gin.Context) {
+		switch c.GetHeader("X-Test-Actor") {
+		case "admin":
+			if err := session.SetLoginUser(c, &admin); err != nil {
+				t.Fatal(err)
+			}
+		case "port":
+			if err := session.SetRestrictedLogin(c, in.Id, "secret"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		c.Next()
+	})
+	NewAnnouncementController(engine.Group("/panel"))
+
+	call := func(method, path, body, actor string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(method, "https://manager.example"+path, strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("X-Requested-With", "XMLHttpRequest")
+		if actor != "" {
+			r.Header.Set("X-Test-Actor", actor)
+		}
+		engine.ServeHTTP(w, r)
+		return w
+	}
+
+	activeRead := func(actor string) bool {
+		t.Helper()
+		w := call(http.MethodGet, "/panel/announcement/active", "", actor)
+		if w.Code != http.StatusOK {
+			t.Fatalf("active 接口: %d %s", w.Code, w.Body.String())
+		}
+		var payload struct {
+			Obj []model.Announcement `json:"obj"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("active 响应解析失败: %s", w.Body.String())
+		}
+		if len(payload.Obj) != 1 {
+			t.Fatalf("应返回 1 条公告，实际 %d", len(payload.Obj))
+		}
+		return payload.Obj[0].Read
+	}
+
+	if activeRead("admin") || activeRead("port") {
+		t.Fatal("两个账号都应先看到未读公告")
+	}
+	w := call(http.MethodPost, "/panel/announcement/read", `{"ids":[`+strconv.Itoa(row.Id)+`]}`, "admin")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"success":true`) {
+		t.Fatalf("管理员上报已读: %d %s", w.Code, w.Body.String())
+	}
+	if !activeRead("admin") {
+		t.Fatal("管理员读过后应显示已读")
+	}
+	if activeRead("port") {
+		t.Fatal("端口账号不应被管理员的阅读记录影响")
+	}
+	w = call(http.MethodPost, "/panel/announcement/read", `{"ids":[`+strconv.Itoa(row.Id)+`]}`, "port")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"success":true`) {
+		t.Fatalf("端口账号上报已读: %d %s", w.Code, w.Body.String())
+	}
+	if !activeRead("port") {
+		t.Fatal("端口账号自己读过后才应显示已读")
 	}
 }

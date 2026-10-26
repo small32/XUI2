@@ -4,40 +4,21 @@
  * 加载于每个面板页面（见 common/js.html）。工具部分挂在 window.XuiAnnouncement 上，
  * 供「通知公告」历史页（announcements.html）复用同一套已读判定、转义与时间格式化。
  *
- * 已读同时记两处：
- *   1. localStorage（按公告 id + 更新时间），决定弹窗是否再出现；
- *   2. 服务端 xui/announcement/read，供管理员查看触达记录。
+ * 已读由服务端按账号判定（announcement/active 返回每条的 read），浏览器本地不留存
+ * 记录：同一个浏览器先登录过的账号不会把公告"替下一个账号读掉"，换设备也不会重复弹。
+ * 用户在弹窗上确认后才调 announcement/read 上报，网络失败时保留未读，下次登录继续提醒。
  *
  * 公告内容按纯文本渲染：先转义再识别 http(s) 链接，避免公告成为 XSS 入口。
  */
 (function () {
     'use strict';
 
-    var SEEN_KEY = 'xui.announcement.seen';
     var READ_ENDPOINT = 'xui/announcement/read';
     var LEVELS = {
         info: {text: '通知', color: 'blue'},
         warning: {text: '提醒', color: 'orange'},
         important: {text: '重要', color: 'red'},
     };
-
-    function loadSeen() {
-        try {
-            var raw = window.localStorage.getItem(SEEN_KEY);
-            var value = raw ? JSON.parse(raw) : {};
-            return value && typeof value === 'object' ? value : {};
-        } catch (e) {
-            return {};
-        }
-    }
-
-    function saveSeen(seen) {
-        try {
-            window.localStorage.setItem(SEEN_KEY, JSON.stringify(seen));
-        } catch (e) {
-            // 隐私模式下 localStorage 不可写，退化为每次登录都提示，不影响功能。
-        }
-    }
 
     function escapeHtml(text) {
         return String(text).replace(/&/g, '&amp;')
@@ -72,26 +53,25 @@
         return seconds ? new Date(seconds * 1000).toLocaleString() : '-';
     }
 
-    function versionOf(item) {
-        return Number(item && item.updatedAt) || 0;
-    }
-
+    // 已读跟着账号走，由服务端在 active/history 响应里给出，前端不再本地缓存。
     function isUnread(item) {
-        if (!item || !item.id) {
-            return false;
-        }
-        var seen = loadSeen();
-        return !(Number(seen[item.id]) >= versionOf(item));
+        return !!(item && item.id) && item.read !== true;
     }
 
-    // 服务端记录只做尽力而为：失败不影响本地已读状态。
+    // 上报只做尽力而为：失败时回调会收到 false，调用方可据此把界面恢复成未读，
+    // 下次打开还会继续提示，不会悄悄丢掉一次公告提醒。
     // 用 fetch + keepalive：点「查看全部公告」会立刻跳转，普通 XHR 会被页面卸载中断。
-    function reportRead(ids) {
+    function reportRead(ids, callback) {
         if (!ids || ids.length === 0) {
             return;
         }
         var body = JSON.stringify({ids: ids});
         var url = basePath + READ_ENDPOINT;
+        var done = function (ok) {
+            if (callback) {
+                callback(ok);
+            }
+        };
         if (window.fetch) {
             try {
                 fetch(url, {
@@ -103,7 +83,10 @@
                     credentials: 'same-origin',
                     body: body,
                     keepalive: true,
+                }).then(function (resp) {
+                    done(!!(resp && resp.ok));
                 }).catch(function () {
+                    done(false);
                 });
                 return;
             } catch (e) {
@@ -114,28 +97,38 @@
             axios.post(url, body, {
                 headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
                 timeout: 8000,
+            }).then(function (resp) {
+                done(!!(resp && resp.data && resp.data.success));
             }).catch(function () {
+                done(false);
             });
         } catch (e) {
-            // 网络异常时忽略，下次打开还会继续提示。
+            done(false);
         }
     }
 
+    // 乐观地把界面标成已读，上报失败再退回未读——两者都以服务端为准。
     function markRead(items) {
         if (!items || items.length === 0) {
             return;
         }
-        var seen = loadSeen();
         var ids = [];
         items.forEach(function (item) {
             if (!item || !item.id) {
                 return;
             }
-            seen[item.id] = versionOf(item);
+            item.read = true;
             ids.push(item.id);
         });
-        saveSeen(seen);
-        reportRead(ids);
+        reportRead(ids, function (ok) {
+            if (!ok) {
+                items.forEach(function (item) {
+                    if (item && item.id) {
+                        item.read = false;
+                    }
+                });
+            }
+        });
     }
 
     function unread(items) {

@@ -36,7 +36,7 @@ func TestAnnouncementAudience(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	panel, err := s.Active(AnnouncementAudiencePanel)
+	panel, err := s.Active(AnnouncementAudiencePanel, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestAnnouncementHiddenWhenDisabledOrExpired(t *testing.T) {
 	if _, err := s.Save(&AnnouncementInput{Title: "过期的", Content: "内容", Enabled: true, ExpireAt: time.Now().Add(-time.Minute).Unix()}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := s.Active(AnnouncementAudiencePanel)
+	rows, err := s.Active(AnnouncementAudiencePanel, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestAnnouncementPinnedFirst(t *testing.T) {
 	if _, err := s.Save(&AnnouncementInput{Title: "置顶", Content: "内容", Enabled: true, Pinned: true}); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := s.Active(AnnouncementAudiencePanel)
+	rows, err := s.Active(AnnouncementAudiencePanel, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestAnnouncementDelete(t *testing.T) {
 	if views, err := s.Receipts(row.Id); err != nil || len(views) != 0 {
 		t.Fatalf("删除公告应同时清理阅读记录，实际 %+v %v", views, err)
 	}
-	rows, err := s.Active(AnnouncementAudiencePanel)
+	rows, err := s.Active(AnnouncementAudiencePanel, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestAnnouncementFilterIsNotBypassedByExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rows, err := s.Active(AnnouncementAudiencePanel)
+	rows, err := s.Active(AnnouncementAudiencePanel, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestAnnouncementHistoryPaging(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	page, err := s.History(1, 2)
+	page, err := s.History(1, 2, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,14 +323,14 @@ func TestAnnouncementHistoryPaging(t *testing.T) {
 			t.Fatalf("停用或仅客户端公告不应出现在历史里: %s", row.Title)
 		}
 	}
-	second, err := s.History(2, 2)
+	second, err := s.History(2, 2, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(second.Items) != 1 || second.Items[0].Id != first.Id {
 		t.Fatalf("第二页应只剩最早的一条，实际 %+v", second.Items)
 	}
-	if empty, err := s.History(0, 0); err != nil || empty.Page != 1 || empty.Size != 20 {
+	if empty, err := s.History(0, 0, ""); err != nil || empty.Page != 1 || empty.Size != 20 {
 		t.Fatalf("非法分页参数应回落到第 1 页 20 条: %+v %v", empty, err)
 	}
 }
@@ -364,10 +364,10 @@ func TestAnnouncementMarkRead(t *testing.T) {
 		t.Fatalf("管理员标识应显示为面板管理员，实际 %q", rows[0].Label)
 	}
 
-	// 把首次时间改成固定值，再上报一次，验证不会被刷新。
+	// read_at 追平内容版本后重复上报不再刷新：保留的是这份内容的首次阅读时间。
 	if err := database.GetDB().Model(&model.AnnouncementReceipt{}).
 		Where("announcement_id = ? AND actor = ?", shared.Id, PanelUserActor(1)).
-		Update("read_at", 1000).Error; err != nil {
+		Update("read_at", shared.Updated).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := s.MarkRead(PanelUserActor(1), AnnouncementAudiencePanel, []int{shared.Id}); err != nil {
@@ -377,8 +377,31 @@ func TestAnnouncementMarkRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rows[0].ReadAt != 1000 {
-		t.Fatalf("重复上报不应刷新首次阅读时间，实际 %d", rows[0].ReadAt)
+	if rows[0].ReadAt != shared.Updated {
+		t.Fatalf("同一内容重复上报不应刷新阅读时间，实际 %d", rows[0].ReadAt)
+	}
+
+	// 公告被编辑（内容版本前进）后再次上报要刷新，否则这条会一直以未读身份反复提醒。
+	edited, err := s.Save(&AnnouncementInput{Id: shared.Id, Title: "公共公告", Content: "修改后的内容",
+		Audience: AnnouncementAudienceAll, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.Updated <= shared.Updated {
+		t.Fatalf("编辑应推进内容版本，实际 %d -> %d", shared.Updated, edited.Updated)
+	}
+	if err := s.MarkRead(PanelUserActor(1), AnnouncementAudiencePanel, []int{shared.Id}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err = s.Receipts(shared.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("刷新阅读时间不应产生重复记录，实际 %d 条", len(rows))
+	}
+	if rows[0].ReadAt < edited.Updated {
+		t.Fatalf("公告更新后上报应刷新到当前版本，实际 %d < %d", rows[0].ReadAt, edited.Updated)
 	}
 
 	// 客户端通道不能把面板专属公告记成已读。
@@ -441,5 +464,75 @@ func TestAnnouncementReceiptsAndReadCount(t *testing.T) {
 	}
 	if _, err := s.Receipts(0); err == nil {
 		t.Fatal("非法公告编号必须报错")
+	}
+}
+
+// 已读状态是账号级的：一个账号确认过不影响另一个账号，公告改版后对已读账号重新提醒。
+// 这取代原先浏览器 localStorage 的判定，避免同一台机器上先登录的账号把公告"替别人读掉"。
+func TestAnnouncementReadStateIsPerActor(t *testing.T) {
+	s := setupAnnouncementDB(t)
+	row, err := s.Save(&AnnouncementInput{Title: "维护通知", Content: "周六晚维护",
+		Audience: AnnouncementAudienceAll, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admin := PanelUserActor(1)
+	port := PanelPortActor(18888)
+
+	readOf := func(actor string) bool {
+		t.Helper()
+		rows, err := s.Active(AnnouncementAudienceAll, actor)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(rows) != 1 {
+			t.Fatalf("应只有一条公告，实际 %d 条", len(rows))
+		}
+		return rows[0].Read
+	}
+
+	if readOf(admin) || readOf(port) {
+		t.Fatal("未确认过的公告应一律为未读")
+	}
+	if err := s.MarkRead(admin, AnnouncementAudiencePanel, []int{row.Id}); err != nil {
+		t.Fatal(err)
+	}
+	if !readOf(admin) {
+		t.Fatal("管理员确认后应为已读")
+	}
+	if readOf(port) {
+		t.Fatal("端口账号不应受管理员阅读记录影响")
+	}
+	// 历史列表同样按账号回填。
+	page, err := s.History(1, 20, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Read {
+		t.Fatalf("历史公告也应按账号判定未读: %+v", page.Items)
+	}
+
+	// 公告改版后应对所有人重新提醒。
+	edited, err := s.Save(&AnnouncementInput{Id: row.Id, Title: "维护通知", Content: "改到周日维护",
+		Audience: AnnouncementAudienceAll, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readOf(admin) {
+		t.Fatalf("公告更新后管理员应重新变为未读（old=%d new=%d）", row.Updated, edited.Updated)
+	}
+	if err := s.MarkRead(admin, AnnouncementAudiencePanel, []int{row.Id}); err != nil {
+		t.Fatal(err)
+	}
+	if !readOf(admin) {
+		t.Fatal("再次确认后应回到已读，不能反复提醒")
+	}
+	// 客户端自带去重，服务端不下发已读状态。
+	feed, err := s.ClientFeed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(feed.Announcements) != 1 {
+		t.Fatalf("客户端应始终拿到全部公告，实际 %d 条", len(feed.Announcements))
 	}
 }
