@@ -411,14 +411,21 @@ func (s *SettingService) SetCertFiles(cert, key string) error {
 }
 
 func (s *SettingService) GetSecret() ([]byte, error) {
-	secret, err := s.getString("secret")
-	if secret == defaultValueMap["secret"] {
-		err := s.saveSetting("secret", secret)
-		if err != nil {
-			logger.Warning("save secret failed:", err)
-		}
+	setting, err := s.getSetting("secret")
+	if err == nil && setting.Value != "" {
+		return []byte(setting.Value), nil
 	}
-	return []byte(secret), err
+	if err != nil && !database.IsNotFound(err) {
+		return nil, err
+	}
+	// 首次使用（或值为空）才落库：secret 的默认值是本进程随机生成的，
+	// 之前拿返回值与默认值比较，落库之后两者仍然相等，导致每次调用都 UPDATE 一次。
+	// 订阅接口是公开的，每个请求都会调到这里，因此必须只写一次。
+	secret := defaultValueMap["secret"]
+	if err := s.saveSetting("secret", secret); err != nil {
+		logger.Warning("save secret failed:", err)
+	}
+	return []byte(secret), nil
 }
 
 func (s *SettingService) GetBasePath() (string, error) {

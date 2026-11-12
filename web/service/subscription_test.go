@@ -1,10 +1,12 @@
 package service
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v2"
+	"xui/database"
 	"xui/database/model"
 )
 
@@ -15,8 +17,21 @@ ruleset=🎯 全球直连,[]DOMAIN-SUFFIX,lan
 ruleset=🎯 全球直连,[]IP-CIDR,192.168.0.0/16,no-resolve
 ruleset=🛑 全球拦截,[]DOMAIN-SUFFIX,ads.example.com
 ruleset=🚀 节点选择,[]URL-REGEX,^https?://video\.example\.com/
+ruleset=❓ 不存在的组,[]DOMAIN-SUFFIX,orphan.example.com
 ruleset=🐟 漏网之鱼,[]FINAL
 `
+
+// 规则文件可能晚于首次调用注入，失败不能被缓存，否则订阅永久 500。
+func TestSubscriptionRulesRetryAfterLateInjection(t *testing.T) {
+	SetSubscriptionRules(nil)
+	if _, err := loadSubRules(); err == nil {
+		t.Fatal("规则未注入时应当报错")
+	}
+	SetSubscriptionRules([]byte(testSubscriptionRules))
+	if _, err := loadSubRules(); err != nil {
+		t.Fatalf("注入规则后应当可用: %v", err)
+	}
+}
 
 func TestSubscriptionClashConfig(t *testing.T) {
 	t.Setenv("XUI_ROLE", "agent")
@@ -83,6 +98,10 @@ func TestSubscriptionClashConfig(t *testing.T) {
 	if !strings.Contains(string(data), "🚀 节点选择") {
 		t.Fatalf("分组名缺少 emoji:\n%s", data)
 	}
+	// 规则指向不存在的策略组时，Clash 会拒绝整份配置，这类规则必须丢弃
+	if strings.Contains(joined, "orphan.example.com") {
+		t.Fatalf("指向未知策略组的规则没有被丢弃:\n%s", joined)
+	}
 }
 
 func TestSubscriptionToken(t *testing.T) {
@@ -104,5 +123,30 @@ func TestSubscriptionToken(t *testing.T) {
 	}
 	if _, err := sub.Verify("99-" + token[strings.Index(token, "-")+1:]); err == nil {
 		t.Fatal("改掉入站编号后签名仍然通过")
+	}
+}
+
+// secret 的默认值是进程启动时随机生成的，落库后与默认值恒等，
+// 旧实现每次调用都会 UPDATE 一次；订阅接口是公开的，必须只写一次。
+func TestGetSecretWritesOnce(t *testing.T) {
+	clientTestDB(t)
+	svc := new(SettingService)
+	first, err := svc.GetSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.GetSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatalf("两次读取的 secret 不一致")
+	}
+	var count int64
+	if err := database.GetDB().Model(&model.Setting{}).Where("key = ?", "secret").Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("secret 记录条数异常: %d", count)
 	}
 }

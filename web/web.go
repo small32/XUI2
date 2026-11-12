@@ -272,6 +272,8 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 	// 订阅规则随静态资源一起打包，交由 service 层在本地生成客户端配置。
 	if rules, err := assetsFS.ReadFile("assets/config/ACL4SSR_Mini.ini"); err == nil {
 		service.SetSubscriptionRules(rules)
+	} else {
+		logger.Warning("订阅规则文件读取失败，生成订阅将不可用: ", err)
 	}
 
 	s.index = controller.NewIndexController(g)

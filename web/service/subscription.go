@@ -52,68 +52,82 @@ var clashRuleTypes = map[string]bool{
 }
 
 var (
-	subRuleOnce  sync.Once
-	subRules     []subRule
-	subRuleErr   error
-	subRuleBytes []byte
+	subRuleMu     sync.Mutex
+	subRules      []subRule
+	subRulesReady bool
+	subRuleBytes  []byte
 )
 
 // SetSubscriptionRules 由面板启动时注入规则文件内容（随静态资源一起打包），
 // 规则文件格式沿用 ACL4SSR Mini：每行 ruleset=组名,[]规则。
 func SetSubscriptionRules(data []byte) {
+	subRuleMu.Lock()
+	defer subRuleMu.Unlock()
 	subRuleBytes = data
+	subRules = nil
+	subRulesReady = false
 }
 
 func loadSubRules() ([]subRule, error) {
-	subRuleOnce.Do(func() {
-		if len(subRuleBytes) == 0 {
-			subRuleErr = errors.New("订阅规则未加载")
-			return
+	subRuleMu.Lock()
+	defer subRuleMu.Unlock()
+	if subRulesReady {
+		return subRules, nil
+	}
+	if len(subRuleBytes) == 0 {
+		// 不缓存这个失败：规则可能稍后才注入，缓存了会让订阅永久 500。
+		return nil, errors.New("订阅规则未加载")
+	}
+	rules := make([]subRule, 0, 4096)
+	for _, line := range strings.Split(string(subRuleBytes), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") ||
+			strings.HasPrefix(line, "[") {
+			continue
 		}
-		for _, line := range strings.Split(string(subRuleBytes), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") ||
-				strings.HasPrefix(line, "[") {
-				continue
-			}
-			if !strings.HasPrefix(line, "ruleset=") {
-				continue
-			}
-			body := strings.TrimPrefix(line, "ruleset=")
-			sep := strings.Index(body, ",")
-			if sep <= 0 {
-				continue
-			}
-			group := body[:sep]
-			rule := strings.TrimPrefix(body[sep+1:], "[]")
-			parts := strings.Split(rule, ",")
-			if len(parts) == 0 || parts[0] == "" {
-				continue
-			}
-			r := subRule{Group: group}
-			if parts[0] == "FINAL" || parts[0] == "MATCH" {
-				// 兜底规则没有匹配值，输出为 MATCH,<策略组>
-				r.Type = "MATCH"
-			} else {
-				if len(parts) < 2 {
-					continue
-				}
-				r.Type, r.Value = parts[0], parts[1]
-				if len(parts) > 2 {
-					r.Extra = strings.Join(parts[2:], ",")
-				}
-			}
-			// 跳过 Clash 不认识的规则类型，否则整份配置会校验失败
-			if !clashRuleTypes[r.Type] {
-				continue
-			}
-			subRules = append(subRules, r)
+		if !strings.HasPrefix(line, "ruleset=") {
+			continue
 		}
-		if len(subRules) == 0 {
-			subRuleErr = errors.New("订阅规则为空")
+		body := strings.TrimPrefix(line, "ruleset=")
+		sep := strings.Index(body, ",")
+		if sep <= 0 {
+			continue
 		}
-	})
-	return subRules, subRuleErr
+		group := body[:sep]
+		rule := strings.TrimPrefix(body[sep+1:], "[]")
+		parts := strings.Split(rule, ",")
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+		r := subRule{Group: group}
+		if parts[0] == "FINAL" || parts[0] == "MATCH" {
+			// 兜底规则没有匹配值，输出为 MATCH,<策略组>
+			r.Type = "MATCH"
+		} else {
+			if len(parts) < 2 {
+				continue
+			}
+			r.Type, r.Value = parts[0], parts[1]
+			if len(parts) > 2 {
+				r.Extra = strings.Join(parts[2:], ",")
+			}
+		}
+		// 跳过 Clash 不认识的规则类型，否则整份配置会校验失败
+		if !clashRuleTypes[r.Type] {
+			continue
+		}
+		// 组名必须是下面这五个策略组之一：规则指向不存在的组，Clash 会拒绝整份配置
+		if !knownSubGroup(r.Group) {
+			continue
+		}
+		rules = append(rules, r)
+	}
+	if len(rules) == 0 {
+		return nil, errors.New("订阅规则为空")
+	}
+	subRules = rules
+	subRulesReady = true
+	return subRules, nil
 }
 
 // SubscriptionService 在面板本地生成客户端订阅，不经过任何外部转换服务。
@@ -183,6 +197,16 @@ func unescapeYAMLUnicode(in []byte) []byte {
 	})
 }
 
+// knownSubGroup 判断规则里的策略组是不是面板生成的那几个，
+// 规则文件被改成别的组名时，宁可丢掉这条规则也不能让客户端整份配置失效。
+func knownSubGroup(name string) bool {
+	switch name {
+	case subGroupProxy, subGroupAuto, subGroupDirect, subGroupBlock, subGroupFinal:
+		return true
+	}
+	return false
+}
+
 // clashProxies 汇总订阅里的节点：管理端按被控端逐个生成，被控端用本机地址。
 func clashProxies(in *model.Inbound, fallbackHost string) ([]map[string]interface{}, []string, error) {
 	proxies := []map[string]interface{}{}
@@ -215,6 +239,11 @@ func clashProxies(in *model.Inbound, fallbackHost string) ([]map[string]interfac
 		if err != nil {
 			return nil, nil, err
 		}
+		// 节点没填地址时生成出来也连不上，Mihomo 会接受但整份订阅形同虚设
+		address := hostOnlyAddress(node.Address)
+		if address == "" {
+			continue
+		}
 		name := strings.TrimSpace(node.Name)
 		if name == "" {
 			name = fmt.Sprintf("节点 %d", node.Id)
@@ -223,7 +252,7 @@ func clashProxies(in *model.Inbound, fallbackHost string) ([]map[string]interfac
 			name = fmt.Sprintf("%s · %d", name, node.Id)
 		}
 		used[name] = true
-		p, err := clashProxy(desired, hostOnlyAddress(node.Address), name)
+		p, err := clashProxy(desired, address, name)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", node.Name, err)
 		}
