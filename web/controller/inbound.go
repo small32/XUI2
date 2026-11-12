@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/gin-gonic/gin"
 	"strconv"
+	"strings"
 	"xui/config"
 	"xui/database/model"
 	"xui/logger"
@@ -37,6 +38,34 @@ func (a *InboundController) initRouter(g *gin.RouterGroup) {
 	g.POST("/resetTraffic/:id", a.resetTrafficInbound)
 	g.POST("/update/:id", a.updateInbound)
 	g.POST("/subscription", a.restrictedSubscription)
+	g.POST("/subscription-url/:id", a.subscriptionURL)
+}
+
+// subscriptionURL 生成客户端的 Clash 订阅地址。配置由面板自己出，
+// 客户端拿不到会话，所以把入站编号和签名放进 URL。
+func (a *InboundController) subscriptionURL(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "生成订阅", err)
+		return
+	}
+	// 受限登录只能生成自己那条入站的订阅
+	if restricted := session.GetLoginInboundId(c); restricted > 0 && restricted != id {
+		jsonMsg(c, "生成订阅", fmt.Errorf("无权访问该入站"))
+		return
+	}
+	var subService service.SubscriptionService
+	token, err := subService.Sign(id)
+	if err != nil {
+		jsonMsg(c, "生成订阅", err)
+		return
+	}
+	scheme := "http"
+	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	url := fmt.Sprintf("%s://%s%ssub/%s", scheme, c.Request.Host, c.GetString("base_path"), token)
+	jsonObj(c, gin.H{"url": url, "target": "clash"}, nil)
 }
 
 func (a *InboundController) startTask() {

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"io"
@@ -106,6 +107,26 @@ func (f *wrapAssetsFile) Stat() (fs.FileInfo, error) {
 	return &wrapAssetsFileInfo{
 		FileInfo: info,
 	}, nil
+}
+
+// Seek 必须转发：http.ServeContent 遇到未知扩展名（例如 .ini）要先读一段内容嗅探
+// Content-Type，再 Seek 回起点。fs.File 只声明了 Stat/Read/Close，不转发 Seek 时
+// 这里会直接 500 "seeker can't seek"——.css/.js 有已知 MIME 类型，走不到这段。
+func (f *wrapAssetsFile) Seek(offset int64, whence int) (int64, error) {
+	seeker, ok := f.File.(io.Seeker)
+	if !ok {
+		return 0, errors.New("seeker can't seek")
+	}
+	return seeker.Seek(offset, whence)
+}
+
+// ReadDir 转发给底层文件，目录列举时 http.FileServer 依赖它。
+func (f *wrapAssetsFile) ReadDir(n int) ([]fs.DirEntry, error) {
+	dir, ok := f.File.(fs.ReadDirFile)
+	if !ok {
+		return nil, errors.New("readdir: not implemented")
+	}
+	return dir.ReadDir(n)
 }
 
 type wrapAssetsFileInfo struct {
@@ -248,10 +269,16 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 
 	g := engine.Group(basePath)
 
+	// 订阅规则随静态资源一起打包，交由 service 层在本地生成客户端配置。
+	if rules, err := assetsFS.ReadFile("assets/config/ACL4SSR_Mini.ini"); err == nil {
+		service.SetSubscriptionRules(rules)
+	}
+
 	s.index = controller.NewIndexController(g)
 	s.server = controller.NewServerController(g)
 	s.xui = controller.NewXUIController(g)
 	controller.RegisterClientAPI(g)
+	controller.RegisterSubscription(g)
 	if config.Role() == "agent" {
 		controller.RegisterAgentAPI(engine)
 	}

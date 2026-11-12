@@ -170,20 +170,10 @@
     {{end}}
     <a-modal v-model="clashSubscriptionVisible" title="生成订阅"
              :footer="null">
-        <p>ACL4SSR_Mini 本地精简版（随面板发布，不依赖外链） · 默认后端 api.wcc.best</p>
-        <a-form layout="vertical">
-            <a-form-item label="订阅方式">
-                <a-select v-model="subscriptionTarget" @change="updateSubscriptionUrl">
-                    <a-select-option value="clash">Clash（Shadowrocket、Stash兼容）</a-select-option>
-                    <a-select-option value="surge">Surge</a-select-option>
-                    <a-select-option value="quanx">Quantumult X</a-select-option>
-                    <a-select-option value="loon">Loon</a-select-option>
-                </a-select>
-            </a-form-item>
-        </a-form>
+        <p>Clash 订阅 · 由面板直接生成，节点与规则都在本机，不经过任何外部转换服务</p>
         <a-input type="textarea" :value="clashSubscriptionUrl" readonly
                  :autosize="{ minRows: 4, maxRows: 10 }"></a-input>
-        <p style="margin-top: 12px">导入或更新订阅时，节点信息将发送到上述转换后端；规则配置由面板自身提供，转换后端需能访问面板地址。</p>
+        <p style="margin-top: 12px">把上面的地址填入 Clash 等客户端即可。地址内含签名，等同于账号凭证，请勿外传；泄露后可在面板设置中重置密钥使其全部失效。</p>
         <a-button id="clash-subscription-copy" type="primary"
                   :data-clipboard-text="clashSubscriptionUrl">复制订阅链接</a-button>
     </a-modal>
@@ -196,9 +186,6 @@
 
     const restricted = {{ .restricted }};
     const role = "{{ .role }}";
-    // 规则配置随面板一起发布，路径带资源摘要：改了规则，转换后端取到的是新文件，
-    // 不会命中静态资源的一年缓存。
-    const subscriptionConfigPath = 'assets/config/ACL4SSR_Mini.ini?v={{ .cur_ver }}';
 
     const columns = [{
         title: "操作",
@@ -275,8 +262,6 @@
             statusByInboundId: {},
             clashSubscriptionVisible: false,
             clashSubscriptionUrl: '',
-            subscriptionTarget: 'clash',
-            subscriptionNodes: '',
         },
         methods: {
             clientPlatformName(platform) {
@@ -534,23 +519,14 @@
                 if (!links) return;
                 qrModal.show('二维码', links);
             },
-            updateSubscriptionUrl() {
-                // config 用面板自带的本地精简规则，不再依赖 GitHub raw 的可达性；
-                // 转换后端在服务端取这个地址，所以必须是绝对地址。
-                const configUrl = window.location.origin + basePath + subscriptionConfigPath;
-                this.clashSubscriptionUrl = 'https://api.wcc.best/sub?target=' + this.subscriptionTarget
-                    + (this.subscriptionTarget === 'surge' ? '&ver=4' : '') + '&url='
-                    + encodeURIComponent(this.subscriptionNodes)
-                    + '&insert=false&config=' + encodeURIComponent(configUrl)
-                    + '&emoji=true&list=false&tfo=false&scv=true&fdn=false'
-                    + '&expand=true&sort=false&new_name=true';
-            },
             async showClashSubscription(dbInbound) {
-                if (!dbInbound.hasLink()) return;
-                const links = await this.inboundLinks(dbInbound);
-                if (!links) return;
-                this.subscriptionNodes = links.map(item => item.content).join('|');
-                this.updateSubscriptionUrl();
+                // 订阅地址由面板签发：客户端拿不到会话，靠 URL 里的签名鉴权。
+                const resp = await HttpUtil.post('/xui/inbound/subscription-url/' + dbInbound.id);
+                if (!resp.success) {
+                    this.$message.error(resp.msg || '生成订阅失败');
+                    return;
+                }
+                this.clashSubscriptionUrl = resp.obj.url;
                 this.clashSubscriptionVisible = true;
                 this.$nextTick(() => {
                     if (!this.clashSubscriptionClipboard) {

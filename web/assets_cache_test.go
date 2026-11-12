@@ -3,24 +3,32 @@ package web
 import (
 	"errors"
 	"io/fs"
-	"strings"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"testing/fstest"
+
+	"github.com/gin-gonic/gin"
 )
 
-// 生成订阅的规则配置随面板一起发布，必须真的打进二进制：embed 指令写错或文件挪走时，
-// 转换后端取到的是 404，订阅会直接失败，而这类问题在页面上看不出来。
-func TestSubscriptionConfigAssetIsEmbedded(t *testing.T) {
-	const name = "config/ACL4SSR_Mini.ini"
-	data, err := fs.ReadFile(&wrapAssetsFS{FS: assetsFS}, name)
-	if err != nil {
-		t.Fatalf("embedded subscription config: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatal("embedded subscription config is empty")
-	}
-	if !strings.Contains(string(data), "[custom]") {
-		t.Fatalf("subscription config has no [custom] section: %q", string(data))
+// 静态资源必须真的能通过 HTTP 取到。http.ServeContent 对未知扩展名会先读一段嗅探
+// Content-Type，再 Seek 回起点；只包了 Stat 的 fs.File 在这里会报 "seeker can't seek"，
+// 而 .css/.js 有已知 MIME 类型，走不到这段，问题只在非标准扩展名上暴露。
+func TestAssetsServedOverHTTP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.StaticFS("/assets", http.FS(&wrapAssetsFS{FS: assetsFS}))
+
+	for _, name := range []string{"config/ACL4SSR_Mini.ini", "css/client-guide.css", "js/announcement.js"} {
+		req := httptest.NewRequest(http.MethodGet, "/assets/"+name, nil)
+		w := httptest.NewRecorder()
+		engine.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: status=%d body=%q", name, w.Code, w.Body.String())
+		}
+		if w.Body.Len() == 0 {
+			t.Fatalf("%s: 返回了空内容", name)
+		}
 	}
 }
 

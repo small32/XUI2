@@ -68,6 +68,10 @@ func (a *XUIController) checkRestricted(c *gin.Context) {
 		c.Next()
 		return
 	}
+	if strings.HasPrefix(rel, "xui/inbound/subscription-url/") {
+		c.Next()
+		return
+	}
 	if isAjax(c) {
 		pureJsonMsg(c, false, "登录账号无权访问该功能")
 	} else {
