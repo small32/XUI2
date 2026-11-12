@@ -415,6 +415,11 @@ func (s *ServerManagementService) enforceLimits() error {
 		var reason string
 		var account model.Inbound
 		if err := database.GetDB().First(&account, row.InboundId).Error; err != nil {
+			// 账号在统计与这一轮之间被删掉是正常情况，跳过即可，
+			// 不能因此中断其余账号的过期/超限判断。
+			if database.IsNotFound(err) {
+				continue
+			}
 			return err
 		}
 		if account.ExpiryTime > 0 && account.ExpiryTime <= time.Now().UnixMilli() {
@@ -538,6 +543,11 @@ func (s *ServerManagementService) MaybeMonthlyReset() error {
 					return err
 				}
 				for _, node := range nodes {
+					// 停用的节点不派发 upsert：DispatchPending 只调度启用节点的 upsert，
+					// 给停用节点建任务会永远 pending，还会挡住该节点的删除。
+					if !node.Enabled {
+						continue
+					}
 					if err := enqueue(tx, node.Id, &in, "upsert", ""); err != nil {
 						return err
 					}
