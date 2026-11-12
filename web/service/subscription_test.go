@@ -9,10 +9,12 @@ import (
 )
 
 // 订阅规则文件的最小样本，覆盖普通规则、带 no-resolve 的 IP 规则和兜底规则。
+// 最后一条是 Surge 专用的 URL-REGEX：Clash 不支持，生成时必须丢弃，否则整份配置校验失败。
 const testSubscriptionRules = `[custom]
 ruleset=🎯 全球直连,[]DOMAIN-SUFFIX,lan
 ruleset=🎯 全球直连,[]IP-CIDR,192.168.0.0/16,no-resolve
 ruleset=🛑 全球拦截,[]DOMAIN-SUFFIX,ads.example.com
+ruleset=🚀 节点选择,[]URL-REGEX,^https?://video\.example\.com/
 ruleset=🐟 漏网之鱼,[]FINAL
 `
 
@@ -69,6 +71,17 @@ func TestSubscriptionClashConfig(t *testing.T) {
 	}
 	if !strings.Contains(joined, "DOMAIN-SUFFIX,ads.example.com,🛑 全球拦截") {
 		t.Fatalf("缺少广告拦截规则:\n%s", joined)
+	}
+	// Clash 不认 URL-REGEX，混进去会导致客户端整体校验失败
+	if strings.Contains(joined, "URL-REGEX") {
+		t.Fatalf("不支持的规则类型没有被过滤:\n%s", joined)
+	}
+	// 分组名里的 emoji 直接输出，不要再变成 \U0001F680 这类转义
+	if strings.Contains(string(data), `\U0001F680`) {
+		t.Fatalf("emoji 仍被转义:\n%s", data)
+	}
+	if !strings.Contains(string(data), "🚀 节点选择") {
+		t.Fatalf("分组名缺少 emoji:\n%s", data)
 	}
 }
 

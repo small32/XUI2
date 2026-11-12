@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
+	"unicode"
 
 	"gopkg.in/yaml.v2"
 	"xui/config"
@@ -29,6 +31,24 @@ type subRule struct {
 	Value string
 	Extra string
 	Group string
+}
+
+// clashRuleTypes 是 Clash（Mihomo）真正支持的规则类型。ACL4SSR 规则集里混着
+// Surge 专用的 URL-REGEX，带进去会让客户端整体校验失败（unsupported rule type）。
+var clashRuleTypes = map[string]bool{
+	"DOMAIN":         true,
+	"DOMAIN-SUFFIX":  true,
+	"DOMAIN-KEYWORD": true,
+	"DOMAIN-REGEX":   true,
+	"GEOIP":          true,
+	"IP-CIDR":        true,
+	"IP-CIDR6":       true,
+	"SRC-IP-CIDR":    true,
+	"SRC-PORT":       true,
+	"DST-PORT":       true,
+	"PROCESS-NAME":   true,
+	"PROCESS-PATH":   true,
+	"MATCH":          true,
 }
 
 var (
@@ -82,6 +102,10 @@ func loadSubRules() ([]subRule, error) {
 				if len(parts) > 2 {
 					r.Extra = strings.Join(parts[2:], ",")
 				}
+			}
+			// 跳过 Clash 不认识的规则类型，否则整份配置会校验失败
+			if !clashRuleTypes[r.Type] {
+				continue
 			}
 			subRules = append(subRules, r)
 		}
@@ -137,7 +161,26 @@ func (s *SubscriptionService) ClashConfig(in *model.Inbound, fallbackHost string
 		"proxy-groups": groups,
 		"rules":        out,
 	}
-	return yaml.Marshal(cfg)
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return unescapeYAMLUnicode(data), nil
+}
+
+// yamlUnicodeEscape 匹配 yaml.v2 为非 BMP 字符输出的 \U 八位转义。
+var yamlUnicodeEscape = regexp.MustCompile(`\\U([0-9A-Fa-f]{8})`)
+
+// unescapeYAMLUnicode 把 \U0001F680 这类转义还原成真实字符。两种写法 Mihomo 都认，
+// 但配置文件是给人排查的，满屏转义码不好读。
+func unescapeYAMLUnicode(in []byte) []byte {
+	return yamlUnicodeEscape.ReplaceAllFunc(in, func(m []byte) []byte {
+		v, err := strconv.ParseUint(string(m[2:]), 16, 32)
+		if err != nil || v > unicode.MaxRune {
+			return m
+		}
+		return []byte(string(rune(v)))
+	})
 }
 
 // clashProxies 汇总订阅里的节点：管理端按被控端逐个生成，被控端用本机地址。
