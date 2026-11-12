@@ -25,6 +25,7 @@ func clientGitHubAppTestDB(t *testing.T) *model.User {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "github-app-controller.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db, _ := database.GetDB().DB()
 	t.Cleanup(func() { db.Close() })
 	var admin model.User

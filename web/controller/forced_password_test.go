@@ -22,6 +22,7 @@ func TestReservedAdminMustChangePasswordBeforeManagement(t *testing.T) {
 	if err := database.InitDB(dbPath); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	initial, err := database.ReservedAdminPassword()
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +85,7 @@ func TestReservedAdminMustChangePasswordBeforeManagement(t *testing.T) {
 	if err := database.InitDB(dbPath); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	user := new(service.UserService).CheckUser(model.RootUsername, newPassword)
 	if user == nil || user.MustChangePassword {
 		t.Fatal("changed password was not preserved across initialization")

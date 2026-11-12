@@ -14,6 +14,7 @@ func TestInboundTargetsLimitDispatchAndHeartbeat(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "targets.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db := database.GetDB()
 	sqlDB, err := db.DB()
 	if err != nil {

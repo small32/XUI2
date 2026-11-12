@@ -163,6 +163,9 @@ func InitDB(dbPath string) error {
 		gormLogger = logger.Discard
 	}
 
+	// 重复初始化（测试里常见）会替换全局句柄，旧连接必须先关掉，否则文件一直被占用。
+	CloseDB()
+
 	c := &gorm.Config{
 		Logger: gormLogger,
 	}
@@ -202,6 +205,19 @@ func InitDB(dbPath string) error {
 
 func GetDB() *gorm.DB {
 	return db
+}
+
+// CloseDB 关闭当前的数据库连接。sqlite 会一直持有数据库文件句柄，
+// Windows 下进程未释放句柄时连 t.TempDir 的清理都会失败，测试必须在 t.Cleanup 里调用它。
+func CloseDB() {
+	if db == nil {
+		return
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return
+	}
+	_ = sqlDB.Close()
 }
 
 func IsNotFound(err error) bool {

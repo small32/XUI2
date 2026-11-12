@@ -22,6 +22,7 @@ func TestAgentLocalInboundEditing(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	in := model.Inbound{UserId: 1, ManagerAccountID: 42, ManagerRevision: "accepted-revision", Port: 3102, Protocol: model.VLESS, Remark: "客户", Enable: true, Up: 123, Down: 456, Tag: "inbound-3102", Settings: "{}", StreamSettings: "{}", Sniffing: "{}"}
 	if err := database.GetDB().Create(&in).Error; err != nil {
 		t.Fatal(err)
@@ -86,6 +87,7 @@ func TestAgentLocalInboundCreation(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	ctrl := &InboundController{}
 	ctrl.xrayService.IsNeedRestartAndSetFalse()
 	t.Cleanup(func() { ctrl.xrayService.IsNeedRestartAndSetFalse() })

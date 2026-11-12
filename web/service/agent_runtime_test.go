@@ -10,6 +10,7 @@ import (
 
 func TestAgentReloadFailureRemainsRetryable(t *testing.T) {
  if err:=database.InitDB(filepath.Join(t.TempDir(),"reload.db")); err!=nil { t.Fatal(err) }
+ t.Cleanup(database.CloseDB)
  old:=restartManagedXray
  t.Cleanup(func(){restartManagedXray=old})
  calls:=0

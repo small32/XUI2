@@ -14,6 +14,12 @@ func TestLegacyInboundPreservesLimitAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// sqlite 会一直占用库文件，Windows 下不关会让 t.TempDir 的清理失败。
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err := db.Exec(`CREATE TABLE inbound (id integer PRIMARY KEY, port integer, total integer, expiry_time integer)`).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -48,6 +48,7 @@ func TestDifferentNodeProtocolsSurviveDispatchReconciliationAndSubscription(t *t
 	if err := database.InitDB(filepath.Join(t.TempDir(), "protocols.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db := database.GetDB()
 	sqlDB, err := db.DB()
 	if err != nil {

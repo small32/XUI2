@@ -22,6 +22,7 @@ func TestSlowDispatchAllowsQueueAndPreservesNewerUpsert(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	started := make(chan struct{})
 	release := make(chan struct{})
 	defer func() {
@@ -120,6 +121,7 @@ func TestDispatchRecoversClaimLeftByPreviousProcess(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	var applied atomic.Int32
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -173,6 +175,7 @@ func TestMissingDisableRepairsCurrentAccountState(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	var repaired model.Inbound
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -226,6 +229,7 @@ func TestCorrectedUpsertReplacesFailedPendingPayload(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	var received []string
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -281,6 +285,7 @@ func TestFailedAccountDoesNotBlockOtherAccountsOnSameNode(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	var received []int
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -334,6 +339,7 @@ func TestCorrectedUpsertKeepsMonthlyResetBarrier(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	in := model.Inbound{Port: 43339, Protocol: model.Trojan, Settings: `{}`, StreamSettings: `{}`, Sniffing: `{}`, Tag: "inbound-43339", MonthlyReset: true, Remark: "old"}
 	if err := database.GetDB().Create(&in).Error; err != nil {
 		t.Fatal(err)
@@ -367,6 +373,7 @@ func TestDisabledNodeTasksDoNotFillDispatchPage(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	var upserts int
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -416,6 +423,7 @@ func TestManualResetEnablesAccountOnDisabledNode(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	var operations []string
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -472,6 +480,7 @@ func TestManualResetRecreatesMissingRemoteAccount(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	created := false
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -508,6 +517,7 @@ func TestPendingManualResetDoesNotSuspendLimitEnforcement(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -544,6 +554,7 @@ func TestMonthlyArchiveIncludesDisabledNode(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if strings.HasSuffix(r.URL.Path, "/traffic/reset") {
@@ -578,6 +589,7 @@ func TestLateMonthlyRetryUpdatesAlreadyClosedArchive(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	var available atomic.Bool
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -628,6 +640,7 @@ func TestFailedTaskRetriesTwelveTimesThenAbandonsDependents(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -665,6 +678,7 @@ func TestDeleteCancelsPendingEnableOnDisabledNode(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -697,6 +711,7 @@ func TestDisabledNodeFinishesOutstandingMonthlyReset(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err := database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)
@@ -747,6 +762,7 @@ func TestHistoricalNodeUsageIsSeparatedByMonth(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "history.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	for _, row := range []model.TrafficSnapshot{
 		{InboundId: 7, Yyyymm: 202607, Port: 43339, RemoteUp: 20},
 		{InboundId: 7, Yyyymm: 202608, Port: 43339, RemoteUp: 30},
@@ -776,6 +792,7 @@ func TestUnrelatedSyncFailureDoesNotBlockCompletedMonth(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "month.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {

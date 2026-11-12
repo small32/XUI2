@@ -16,6 +16,7 @@ func TestLocalProxySettingsPreserveManualTemplateAndRejectInboundPortConflict(t 
 	if err := database.InitDB(filepath.Join(t.TempDir(), "upstream.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err := database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +78,7 @@ func TestManagerLocalProxyNeverStartsSharedAccountInbounds(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager-upstream.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err := database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)
@@ -116,6 +118,7 @@ func TestSystemProxyTrafficDoesNotConsumeInboundAccountQuota(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "proxy-traffic.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err := database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)

@@ -17,6 +17,7 @@ func clientTestDB(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "client.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db, _ := database.GetDB().DB()
 	t.Cleanup(func() { db.Close() })
 }

@@ -21,6 +21,7 @@ func TestManagerSyncAndSharedLimit(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "manager.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	token := strings.Repeat("a", 64)
 	var upserts, disables atomic.Int32
 	var accountID atomic.Int32
@@ -95,6 +96,7 @@ func TestAgentMonthlyResetIsIdempotent(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "agent.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	account := model.Inbound{UserId: 1, ManagerAccountID: 99, Port: 34872, Protocol: model.Trojan, Settings: `{"clients":[]}`, StreamSettings: `{}`, Sniffing: `{}`, MonthlyReset: true, Up: 30, Down: 20, Enable: true, Tag: "inbound-34872"}
 	if err := database.GetDB().Create(&account).Error; err != nil {
 		t.Fatal(err)
@@ -127,6 +129,7 @@ func TestManagerRetriesFailedNodeWithoutLosingOtherNode(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "retry.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	token := strings.Repeat("b", 64)
 	var fail atomic.Bool
 	fail.Store(true)
@@ -200,6 +203,7 @@ func TestManagerMonthlySnapshotUsesAgentResetResult(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "month.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	token := strings.Repeat("c", 64)
 	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -248,6 +252,7 @@ func TestTrafficFollowsAccountAfterPortChange(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "port.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	account := model.Inbound{UserId: 1, Port: 12345, Protocol: model.Trojan, Settings: `{}`, StreamSettings: `{}`, Sniffing: `{}`, Tag: "inbound-12345"}
 	if err := database.GetDB().Create(&account).Error; err != nil {
 		t.Fatal(err)

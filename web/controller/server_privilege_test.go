@@ -24,6 +24,7 @@ func TestRestrictedLoginDeniedOnAdminEndpoints(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "sessions.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	admin := &model.User{Username: "admin", Password: "test-hash"}
 	if err := database.GetDB().Create(admin).Error; err != nil {
 		t.Fatal(err)

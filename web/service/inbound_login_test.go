@@ -12,6 +12,7 @@ func TestInboundLoginUsesPortAndPassword(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "login.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db := database.GetDB()
 	sqlDB, err := db.DB()
 	if err != nil {

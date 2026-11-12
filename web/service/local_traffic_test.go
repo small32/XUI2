@@ -15,6 +15,7 @@ func TestLocalInboundTrafficIsCollectedWithoutManagedMutations(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "traffic.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db := database.GetDB()
 	sqlDB, err := db.DB()
 	if err != nil {
@@ -73,6 +74,7 @@ func TestLocalTrafficEntersSharedAccountTotalsByPort(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "separate.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db := database.GetDB()
 	sqlDB, err := db.DB()
 	if err != nil {

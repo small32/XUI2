@@ -24,6 +24,7 @@ func TestInboundMonthlyResetRoundTrip(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db := database.GetDB()
 	in := &model.Inbound{
 		UserId: 1,

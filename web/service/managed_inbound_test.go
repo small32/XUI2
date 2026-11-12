@@ -14,6 +14,7 @@ func TestManagedInboundOverwritesSamePortAndPreservesTraffic(t *testing.T) {
 			if err := database.InitDB(filepath.Join(t.TempDir(), "overwrite.db")); err != nil {
 				t.Fatal(err)
 			}
+			t.Cleanup(database.CloseDB)
 			db := database.GetDB()
 			sqlDB, err := db.DB()
 			if err != nil {
@@ -50,6 +51,7 @@ func TestManagedInboundPortMoveOverwritesOccupiedPort(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "move.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db := database.GetDB()
 	sqlDB, err := db.DB()
 	if err != nil {

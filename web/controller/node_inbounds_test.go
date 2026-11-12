@@ -19,6 +19,7 @@ func TestAgentAllInboundsIncludesLocalAndManaged(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "read.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err := database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)

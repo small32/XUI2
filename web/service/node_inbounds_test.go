@@ -14,6 +14,7 @@ func TestImportNodeInboundPreservesTargetIdentityAndTraffic(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "copy.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err := database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +64,7 @@ func TestCopyNodeInboundsUsesSelectedPortsAndTargets(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "nodes.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err := database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)

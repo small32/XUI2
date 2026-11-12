@@ -27,6 +27,7 @@ func TestClientAPIManagerOnlyAndAccountIsolation(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "api.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	db, _ := database.GetDB().DB()
 	t.Cleanup(func() { db.Close() })
 	in := model.Inbound{Port: 18888, Enable: true, Protocol: model.Shadowsocks, Settings: `{"method":"aes-128-gcm","password":"secret"}`, StreamSettings: `{}`, Sniffing: `{}`, Tag: "inbound-18888", Total: 1000}

@@ -13,6 +13,7 @@ func TestHostNetworkMonthlyTrafficPersistsAndHandlesRebootAndMonthChange(t *test
 	if err := database.InitDB(path); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err := database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +38,7 @@ func TestHostNetworkMonthlyTrafficPersistsAndHandlesRebootAndMonthChange(t *test
 	if err := database.InitDB(path); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	sqlDB, err = database.GetDB().DB()
 	if err != nil {
 		t.Fatal(err)

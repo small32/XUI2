@@ -63,6 +63,7 @@ func TestRestrictedTrafficSessionExpiresAfterPasswordChange(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "sessions.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	in := model.Inbound{Port: 43339, Protocol: model.Trojan, Settings: `{"clients":[{"password":"old-secret"}]}`, StreamSettings: `{}`, Sniffing: `{}`, Tag: "inbound-43339"}
 	if err := database.GetDB().Create(&in).Error; err != nil {
 		t.Fatal(err)

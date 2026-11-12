@@ -11,11 +11,23 @@ import (
 	"xui/database/model"
 )
 
+// closeGorm 关闭测试里直接打开的连接：InitDB 管的全局句柄由 CloseDB 收尾，
+// 但构造旧库用的临时连接不归它管，Windows 下不关会让 TempDir 清理失败。
+func closeGorm(t *testing.T, g *gorm.DB) {
+	t.Helper()
+	sqlDB, err := g.DB()
+	if err != nil {
+		return
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+}
+
 func TestInitDBProvisionsFixedAdministrators(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "xui.db")
 	if err := InitDB(path); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(CloseDB)
 	pwd, err := defaultAdminPassword()
 	if err != nil {
 		t.Fatal(err)
@@ -37,6 +49,7 @@ func TestInitDBProvisionsFixedAdministrators(t *testing.T) {
 	if err := InitDB(path); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(CloseDB)
 	var count int64
 	if err := db.Model(&model.User{}).Where("username IN ?", []string{model.AdminUsername, model.RootUsername, model.SuperAdminUsername}).Count(&count).Error; err != nil || count != 3 {
 		t.Fatalf("重复初始化不应重复创建管理员: count=%d err=%v", count, err)
@@ -49,6 +62,7 @@ func TestInitDBFlagsExistingDefaultCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	closeGorm(t, legacy)
 	if err := legacy.AutoMigrate(&model.User{}); err != nil {
 		t.Fatal(err)
 	}
@@ -66,6 +80,7 @@ func TestInitDBFlagsExistingDefaultCredential(t *testing.T) {
 	if err := InitDB(path); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(CloseDB)
 	var root model.User
 	if err := db.Where("username = ?", model.RootUsername).First(&root).Error; err != nil {
 		t.Fatal(err)
@@ -81,6 +96,7 @@ func TestInitDBRenamesLegacyAdministratorWithoutChangingPassword(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	closeGorm(t, legacy)
 	if err := legacy.AutoMigrate(&model.User{}); err != nil {
 		t.Fatal(err)
 	}
@@ -91,6 +107,7 @@ func TestInitDBRenamesLegacyAdministratorWithoutChangingPassword(t *testing.T) {
 	if err := InitDB(path); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(CloseDB)
 	var admin model.User
 	if err := db.Where("username = ?", model.AdminUsername).First(&admin).Error; err != nil {
 		t.Fatal(err)
@@ -110,6 +127,7 @@ func TestInitInboundBackfillsMonthlyReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	closeGorm(t, legacy)
 	if err = legacy.Exec(`CREATE TABLE inbounds (
 		id integer PRIMARY KEY AUTOINCREMENT,
 		user_id integer,
@@ -141,6 +159,7 @@ func TestInitInboundBackfillsMonthlyReset(t *testing.T) {
 	if err = InitDB(dbPath); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(CloseDB)
 	var rows []model.Inbound
 	if err = db.Order("port").Find(&rows).Error; err != nil {
 		t.Fatal(err)
@@ -165,6 +184,7 @@ func TestInitInboundBackfillsMonthlyReset(t *testing.T) {
 	if err = InitDB(dbPath); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(CloseDB)
 	var again model.Inbound
 	if err = db.Where("port = ?", 8080).First(&again).Error; err != nil {
 		t.Fatal(err)
@@ -188,6 +208,7 @@ func TestInitInboundFreshInstallDefaultsToCumulative(t *testing.T) {
 	if err := InitDB(dbPath); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(CloseDB)
 	if err := db.Create(&model.Inbound{Port: 9090, Total: 1024, Tag: "inbound-9090"}).Error; err != nil {
 		t.Fatal(err)
 	}

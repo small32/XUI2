@@ -60,6 +60,7 @@ func TestAgentDisableMissingAccountIsNotAcknowledged(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "agent.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	token := strings.Repeat("q", 64)
 	t.Setenv("XUI_AGENT_TOKEN", token)
 	router := gin.New()

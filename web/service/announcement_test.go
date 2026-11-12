@@ -15,6 +15,7 @@ func setupAnnouncementDB(t *testing.T) *AnnouncementService {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "announcement.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	// Windows 上 SQLite 不关连接会占住临时目录，显式关闭避免清理失败。
 	db, err := database.GetDB().DB()
 	if err == nil {

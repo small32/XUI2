@@ -14,6 +14,7 @@ func TestPasswordHashing(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	us := &UserService{}
 	if err := us.UpdateFirstUser("admin", "secret123"); err != nil {
 		t.Fatal(err)
@@ -44,6 +45,7 @@ func TestAdminRenameRejectsExistingInboundUsername(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	inbound := model.Inbound{Port: 443, Remark: "customer", Tag: "inbound-443"}
 	if err := database.GetDB().Create(&inbound).Error; err != nil {
 		t.Fatal(err)
@@ -72,6 +74,7 @@ func TestOnlyAdminPasswordCanBeChangedThroughUserService(t *testing.T) {
 	if err := database.InitDB(filepath.Join(t.TempDir(), "xui.db")); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(database.CloseDB)
 	pwd, err := database.ReservedAdminPassword()
 	if err != nil {
 		t.Fatal(err)
