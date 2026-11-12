@@ -155,8 +155,13 @@ func (s *SettingService) GetAllSetting() (*entity.AllSetting, error) {
 }
 
 func (s *SettingService) ResetSettings() error {
-	db := database.GetDB()
-	return db.Where("1 = 1").Delete(model.Setting{}).Error
+	// 只删界面上的设置项。管理者确认月份、GitHub App 私钥、使用说明等内部键
+	// 与"恢复默认"无关，一起删会导致当月不再月度清零、私钥丢失。
+	keys := make([]string, 0, len(defaultValueMap))
+	for key := range defaultValueMap {
+		keys = append(keys, key)
+	}
+	return database.GetDB().Where("key IN ?", keys).Delete(model.Setting{}).Error
 }
 
 func (s *SettingService) getSetting(key string) (*model.Setting, error) {

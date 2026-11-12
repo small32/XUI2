@@ -12,6 +12,7 @@ import (
 	"time"
 	"xui/database"
 	"xui/database/model"
+	"xui/logger"
 	"xui/util/common"
 	"xui/web/entity"
 
@@ -509,7 +510,9 @@ func (s *ServerManagementService) MaybeMonthlyReset() error {
 	// Failed nodes stay in the retry queue. Archive the successful snapshots now
 	// so one unavailable node cannot hold the entire billing month open. A late
 	// successful reset updates this archive in DispatchPending.
-	_ = s.DispatchPending()
+	if dispatchErr := s.DispatchPending(); dispatchErr != nil {
+		logger.Warning("月度重置后补发同步任务失败，留待下一轮重试: ", dispatchErr)
+	}
 	return database.GetDB().Transaction(func(tx *gorm.DB) error {
 		for _, in := range accounts {
 			var snapshots []model.NodeTrafficSnapshot

@@ -182,6 +182,9 @@ func (s *ServerService) GetStatus(lastStatus *Status) *Status {
 	return status
 }
 
+// maxXrayArchiveSize 是下载安装包的大小上限，防止异常响应写满磁盘。
+const maxXrayArchiveSize = 256 << 20
+
 func (s *ServerService) GetXrayVersions() ([]string, error) {
 	url := "https://api.github.com/repos/XTLS/Xray-core/releases"
 	client := &http.Client{Timeout: 20 * time.Second}
@@ -196,8 +199,8 @@ func (s *ServerService) GetXrayVersions() ([]string, error) {
 	}
 	buffer := bytes.NewBuffer(make([]byte, 8192))
 	buffer.Reset()
-	_, err = buffer.ReadFrom(resp.Body)
-	if err != nil {
+	// GitHub 的版本列表只有几十 KB，限制读取量防止异常响应把内存吃掉
+	if _, err = buffer.ReadFrom(io.LimitReader(resp.Body, 8<<20)); err != nil {
 		return nil, err
 	}
 
@@ -248,9 +251,17 @@ func (s *ServerService) downloadXRay(version string) (string, error) {
 	}
 	defer file.Close()
 
-	_, err = io.Copy(file, resp.Body)
+	// 安装包有上限，且失败时不能留下半个文件，否则下次安装会用到损坏的包
+	written, err := io.Copy(file, io.LimitReader(resp.Body, maxXrayArchiveSize+1))
 	if err != nil {
+		file.Close()
+		os.Remove(fileName)
 		return "", err
+	}
+	if written > maxXrayArchiveSize {
+		file.Close()
+		os.Remove(fileName)
+		return "", fmt.Errorf("安装包超过 %d MB 上限", maxXrayArchiveSize>>20)
 	}
 
 	return fileName, nil

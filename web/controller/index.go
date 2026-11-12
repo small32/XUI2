@@ -33,11 +33,20 @@ var (
 func checkLoginRateLimit(ip string) bool {
 	loginFailMu.Lock()
 	defer loginFailMu.Unlock()
+	now := time.Now()
+	// 顺手清理过期条目：以前只有同一 IP 再次尝试才会删除自己，
+	// 换 IP 撞库时这张表会无界增长。
+	if len(loginFailByIP) > 1024 {
+		for addr, state := range loginFailByIP {
+			if now.Sub(state.first) > loginBlockedTime {
+				delete(loginFailByIP, addr)
+			}
+		}
+	}
 	st, ok := loginFailByIP[ip]
 	if !ok {
 		return false
 	}
-	now := time.Now()
 	if now.Sub(st.first) > loginBlockedTime && st.count >= loginFailLimit {
 		// 锁定期结束，清零释放。
 		delete(loginFailByIP, ip)
@@ -110,6 +119,8 @@ func (a *IndexController) login(c *gin.Context) {
 	}
 
 	var form LoginForm
+	// 登录是未认证入口，限制请求体大小，避免超大表单放大内存占用
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
 	err := c.ShouldBind(&form)
 	if err != nil {
 		pureJsonMsg(c, false, "数据格式错误")

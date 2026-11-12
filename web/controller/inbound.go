@@ -254,9 +254,6 @@ func (a *InboundController) delInbound(c *gin.Context) {
 	err = a.inboundService.DelInbound(id)
 	if err == nil {
 		a.server.heartbeatSoon()
-		if config.Role() == "agent" {
-			a.xrayService.SetToNeedRestart()
-		}
 		if syncErr := a.serverService.DeleteSyncedInbound(inbound); syncErr != nil {
 			err = fmt.Errorf("管理端账号已删除，部分被控端同步删除失败并已进入重试队列: %w", syncErr)
 		}

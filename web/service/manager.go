@@ -20,6 +20,7 @@ import (
 	"time"
 	"xui/database"
 	"xui/database/model"
+	"xui/logger"
 	"xui/web/entity"
 
 	"gorm.io/gorm"
@@ -441,6 +442,9 @@ func (s *ServerManagementService) callContext(ctx context.Context, node *model.M
 	if err != nil {
 		return err
 	}
+	// 这里的 client 是每次调用新建的，空闲连接不会有人复用，
+	// 用完立即关掉，避免连接在默认的 90 秒空闲期里堆积。
+	defer client.CloseIdleConnections()
 	var body io.Reader
 	if payload != nil {
 		b, err := json.Marshal(payload)
@@ -465,11 +469,15 @@ func (s *ServerManagementService) callContext(ctx context.Context, node *model.M
 	defer resp.Body.Close()
 	limited := io.LimitReader(resp.Body, 1<<20)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(limited)
 		var failure struct {
 			Error string `json:"error"`
 		}
-		_ = json.NewDecoder(limited).Decode(&failure)
-		return &agentHTTPError{StatusCode: resp.StatusCode, Message: failure.Error}
+		if json.Unmarshal(body, &failure) == nil && failure.Error != "" {
+			return &agentHTTPError{StatusCode: resp.StatusCode, Message: failure.Error}
+		}
+		// 被控端可能返回非 JSON 的错误页，至少把状态码和原始文本带出来
+		return &agentHTTPError{StatusCode: resp.StatusCode, Message: strings.TrimSpace(string(body))}
 	}
 	if out != nil {
 		return json.NewDecoder(limited).Decode(out)
@@ -819,7 +827,9 @@ func (s *ServerManagementService) DispatchPending() error {
 					return updateErr
 				}
 			}
-			_ = database.GetDB().Model(&node).Updates(map[string]interface{}{"last_error": err.Error()}).Error
+			if updateErr := database.GetDB().Model(&node).Updates(map[string]interface{}{"last_error": err.Error()}).Error; updateErr != nil {
+				logger.Warning("记录节点错误失败: ", updateErr)
+			}
 			continue
 		}
 		if err = database.GetDB().Model(&task).Updates(map[string]interface{}{"status": "done", "error": "", "attempts": task.Attempts + 1}).Error; err != nil {
@@ -830,7 +840,9 @@ func (s *ServerManagementService) DispatchPending() error {
 				return err
 			}
 		}
-		_ = database.GetDB().Model(&node).Updates(map[string]interface{}{"last_error": "", "last_seen": time.Now().Unix()}).Error
+		if updateErr := database.GetDB().Model(&node).Updates(map[string]interface{}{"last_error": "", "last_seen": time.Now().Unix()}).Error; updateErr != nil {
+			logger.Warning("更新节点在线状态失败: ", updateErr)
+		}
 	}
 	if len(failures) > 0 {
 		return errors.New(strings.Join(failures, "; "))

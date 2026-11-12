@@ -81,6 +81,8 @@ func (a *ClientController) login(c *gin.Context) {
 		Port     string `json:"port"`
 		Password string `json:"password"`
 	}
+	// 未认证入口限制请求体大小
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
 	if err := c.ShouldBindJSON(&input); err != nil {
 		clientError(c, 400, fmt.Errorf("请输入字符串格式的端口号和密码"))
 		return
@@ -141,6 +143,7 @@ func (a *ClientController) account(c *gin.Context) {
 	}
 	c.JSON(200, v)
 }
+
 // announcements 返回投放给客户端的通知公告。SClash 在账号轮询时一并拉取，
 // 按 id + 内容时间戳去重后以系统通知展示。旧版面板没有该接口时客户端按 404 忽略。
 func (a *ClientController) announcements(c *gin.Context) {
@@ -152,6 +155,7 @@ func (a *ClientController) announcements(c *gin.Context) {
 	c.Header("ETag", fmt.Sprintf("\"%s\"", feed.Version))
 	c.JSON(200, feed)
 }
+
 // announcementsRead 记录客户端已送达/已读的公告，用于管理端查看触达情况。
 // 客户端只需在拿到公告后上报一次；重复上报按首次时间保留，不会产生重复记录。
 func (a *ClientController) announcementsRead(c *gin.Context) {

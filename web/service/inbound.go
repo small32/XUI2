@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -81,6 +82,9 @@ func (s *InboundService) CheckInboundRemark(remark string) error {
 }
 
 func (s *InboundService) AddInbound(inbound *model.Inbound) error {
+	if err := ValidateInboundPayload(inbound); err != nil {
+		return err
+	}
 	exist, err := s.checkPortExist(inbound.Port, 0)
 	if err != nil {
 		return err
@@ -92,7 +96,7 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) error {
 	return db.Save(inbound).Error
 }
 
-func (s *InboundService) AddInbounds(inbounds []*model.Inbound) error {
+func (s *InboundService) AddInbounds(inbounds []*model.Inbound) (err error) {
 	for _, inbound := range inbounds {
 		exist, err := s.checkPortExist(inbound.Port, 0)
 		if err != nil {
@@ -105,13 +109,17 @@ func (s *InboundService) AddInbounds(inbounds []*model.Inbound) error {
 
 	db := database.GetDB()
 	tx := db.Begin()
-	var err error
+	if tx.Error != nil {
+		return tx.Error
+	}
+	// 具名返回：defer 里才能把提交失败带回给调用方，
+	// 否则迁移脚本会打印成功但一行都没落库。
 	defer func() {
-		if err == nil {
-			tx.Commit()
-		} else {
+		if err != nil {
 			tx.Rollback()
+			return
 		}
+		err = tx.Commit().Error
 	}()
 
 	for _, inbound := range inbounds {
@@ -150,6 +158,32 @@ func (s *InboundService) GetInboundByPort(port int) (*model.Inbound, error) {
 	return inbound, nil
 }
 
+// ValidateInboundPayload 校验会原样写进 xray 配置的字段。
+// settings / streamSettings / sniffing 是裸 JSON 拼进 config.json 的，非法内容会让
+// 整份配置无法解析，该被控端的所有入站一起起不来；listen 是手工加引号拼的，
+// 出现引号或反斜杠会破坏 JSON 结构。
+func ValidateInboundPayload(in *model.Inbound) error {
+	for _, field := range []struct {
+		name string
+		raw  string
+	}{
+		{"settings", in.Settings},
+		{"streamSettings", in.StreamSettings},
+		{"sniffing", in.Sniffing},
+	} {
+		if strings.TrimSpace(field.raw) == "" {
+			continue
+		}
+		if !json.Valid([]byte(field.raw)) {
+			return common.NewErrorf("%s 不是合法的 JSON", field.name)
+		}
+	}
+	if strings.ContainsAny(in.Listen, "\"\\\r\n") {
+		return common.NewError("监听地址包含非法字符")
+	}
+	return nil
+}
+
 // CheckInboundCredential 校验受限登录凭据：账号=入站端口号，密码=入站密码或统一密码。
 func (s *InboundService) CheckInboundCredential(username, password string) *model.Inbound {
 	port, err := strconv.Atoi(username)
@@ -161,7 +195,7 @@ func (s *InboundService) CheckInboundCredential(username, password string) *mode
 		return nil
 	}
 	expected := inboundPassword(&inbound)
-	if expected == "" || expected != password {
+	if expected == "" || subtle.ConstantTimeCompare([]byte(expected), []byte(password)) != 1 {
 		return nil
 	}
 	return &inbound
@@ -222,6 +256,9 @@ func arrayFieldPassword(raw interface{}, field string) string {
 }
 
 func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
+	if err := ValidateInboundPayload(inbound); err != nil {
+		return err
+	}
 	exist, err := s.checkPortExist(inbound.Port, inbound.Id)
 	if err != nil {
 		return err
