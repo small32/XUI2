@@ -36,7 +36,7 @@ bash <(curl -fLsS https://raw.githubusercontent.com/small32/XUI2/main/install.sh
 
 账号编辑窗口提供各被控端的协议标签页。勾选“为此被控端单独设置协议”后，可设置该节点的协议、传输、TLS 与监听地址；未勾选的节点使用默认连接设置。备注、端口、总流量、计费方式、到期时间共用账号设置，Trojan、Shadowsocks、HTTP、SOCKS 使用上方“账号统一密码”；VLESS、VMess 的 UUID 保留各自配置。每个节点按自身连接设置计算配置版本，心跳不会将节点专属协议改回默认协议。
 
-生成订阅时合并所选启用节点的实际链接，二维码窗口按节点名称和实际协议分别展示二维码。HTTP/SOCKS 链接使用订阅转换器支持的类 Telegram 链接格式，参见 [subconverter 支持格式](https://github.com/tindy2013/subconverter/blob/master/README.md)。
+生成订阅时合并所选启用节点的实际链接，二维码窗口按节点名称和实际协议分别展示二维码。HTTP/SOCKS 链接使用订阅转换器支持的类 Telegram 链接格式，参见 [subconverter 支持格式](https://github.com/tindy2013/subconverter/blob/master/README.md)。订阅规则使用面板自带的 ACL4SSR_Mini 本地精简配置（`web/assets/config/ACL4SSR_Mini.ini`），不引用任何外部规则集；转换后端在服务端读取该文件，因此面板地址需对它可达。
 
 默认每 10 分钟读取一次所有被控端流量，可设置更长间隔，也可在页面立即刷新。流量限额由所有被控端共同消耗；合计上传和下载达到管理端账号限额时，管理端向所有被控端下发停用。未超限时不修改启用状态。过期账号同样停用。手动停用与超限停用分别记录原因。某个节点断线、账号版本落后或数据过期时，页面显示“未确认”及最近错误；断线期间实际用量可能超过共享限额，连接恢复后会补采并处理。
 

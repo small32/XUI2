@@ -3,9 +3,26 @@ package web
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
+
+// 生成订阅的规则配置随面板一起发布，必须真的打进二进制：embed 指令写错或文件挪走时，
+// 转换后端取到的是 404，订阅会直接失败，而这类问题在页面上看不出来。
+func TestSubscriptionConfigAssetIsEmbedded(t *testing.T) {
+	const name = "config/ACL4SSR_Mini.ini"
+	data, err := fs.ReadFile(&wrapAssetsFS{FS: assetsFS}, name)
+	if err != nil {
+		t.Fatalf("embedded subscription config: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("embedded subscription config is empty")
+	}
+	if !strings.Contains(string(data), "[custom]") {
+		t.Fatalf("subscription config has no [custom] section: %q", string(data))
+	}
+}
 
 func TestAssetCacheVersionStableForUnchangedContent(t *testing.T) {
 	first := fstest.MapFS{

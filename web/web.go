@@ -69,6 +69,9 @@ func assetCacheVersion(files fs.FS) (string, error) {
 	return fmt.Sprintf("%x", digest.Sum(nil)[:8]), nil
 }
 
+// wrapAssetsFS 把 embed.FS 里的 assets/ 前缀藏起来，调用方看到的路径相对 assets 根。
+// Open / ReadFile / ReadDir 都必须自己挡一层：embed.FS 自带同名方法，内嵌后会被提升，
+// 若只重写 Open，走 fs.ReadFile 的快速路径时会绕过前缀，读到 embed 根目录而失败。
 type wrapAssetsFS struct {
 	embed.FS
 }
@@ -81,6 +84,14 @@ func (f *wrapAssetsFS) Open(name string) (fs.File, error) {
 	return &wrapAssetsFile{
 		File: file,
 	}, nil
+}
+
+func (f *wrapAssetsFS) ReadFile(name string) ([]byte, error) {
+	return f.FS.ReadFile("assets/" + name)
+}
+
+func (f *wrapAssetsFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	return f.FS.ReadDir("assets/" + name)
 }
 
 type wrapAssetsFile struct {
