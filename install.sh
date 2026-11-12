@@ -185,15 +185,106 @@ configure_role() {
         done
     done
     /usr/local/xui/xui setting -cert "$panel_cert" -key "$panel_key" || return 1
+    # Retain this exact selection for the post-start TLS check; do not guess
+    # another certificate path when printing the API fingerprint.
+    configured_panel_cert="$panel_cert"
     if [[ "$XUI_ROLE" != agent ]]; then return 0; fi
     echo "被控端 API 令牌（请复制到管理端，仅管理员可见）："
     sed -n 's/^XUI_AGENT_TOKEN=//p' /etc/xui/agent.env
-    # 指纹必须取自面板实际生效的证书：面板启动时优先采用 /root/cert 下由一键申请
-    # 生成的可信证书，只有在它不存在时才退回 /etc/xui 的自签证书。
-    effective_cert="/root/cert/fullchain.cer"
-    [[ -f "$effective_cert" ]] || effective_cert="/etc/xui/panel.crt"
-    echo "证书 SHA256 指纹（填入管理端）："
-    openssl x509 -in "$effective_cert" -outform DER | sha256sum | awk '{print $1}'
+}
+
+# Output a fingerprint only after the selected leaf certificate matches the
+# certificate served by the running panel. Arguments keep this check testable
+# without touching the installed files or system service.
+verify_panel_certificate() {
+    local cert_file="$1" settings_db="$2" expected_fingerprint
+    if ! expected_fingerprint=$( (set -o pipefail; openssl x509 -in "$cert_file" -outform DER | sha256sum) 2>/dev/null); then
+        echo "被控端 API 证书指纹尚未核验：无法读取选定的面板证书；暂不提供可填入管理端的指纹。" >&2
+        return 1
+    fi
+    expected_fingerprint="${expected_fingerprint%% *}"
+    if [[ ! "$expected_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "被控端 API 证书指纹尚未核验：无法计算选定的面板证书指纹；暂不提供可填入管理端的指纹。" >&2
+        return 1
+    fi
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "被控端 API 证书指纹尚未核验：缺少 python3；暂不提供可填入管理端的指纹。" >&2
+        return 1
+    fi
+    PYTHONIOENCODING=utf-8 python3 - "$expected_fingerprint" "$settings_db" <<'PY'
+import hashlib
+import ipaddress
+from contextlib import closing
+from pathlib import Path
+import re
+import socket
+import sqlite3
+import ssl
+import sys
+
+
+def fail(reason):
+    print("被控端 API 证书指纹尚未核验：" + reason + "；暂不提供可填入管理端的指纹。", file=sys.stderr)
+    sys.exit(1)
+
+
+expected_fingerprint, settings_db = sys.argv[1:]
+try:
+    # mode=ro prevents a missing database from becoming a new, empty one.
+    with closing(sqlite3.connect(Path(settings_db).resolve().as_uri() + "?mode=ro", uri=True, timeout=3)) as db:
+        rows = db.execute("SELECT key, value FROM settings WHERE key IN ('webListen', 'webPort')").fetchall()
+    settings = dict(rows)
+    if len(settings) != len(rows):
+        fail("面板监听配置存在重复项")
+    # Match SettingService defaults only when the setting is absent.
+    listen = settings.get("webListen", "")
+    port_text = settings.get("webPort", "54321")
+    if not isinstance(listen, str) or not isinstance(port_text, str) or not re.fullmatch(r"[0-9]+", port_text):
+        fail("面板监听地址或端口配置无效")
+    port = int(port_text)
+    if not 1 <= port <= 65535:
+        fail("面板监听端口超出有效范围")
+except (OSError, sqlite3.Error, ValueError) as exc:
+    fail("无法读取面板监听配置（%s）" % exc)
+
+# Wildcard bind addresses cannot be used as a destination. Preserve a
+# configured IPv4/IPv6 address (including a zone ID) or hostname otherwise.
+host = listen or "127.0.0.1"
+try:
+    address = ipaddress.ip_address(host)
+    if address.is_unspecified:
+        host = "::1" if address.version == 6 else "127.0.0.1"
+except ValueError:
+    pass
+
+context = ssl.create_default_context()
+context.check_hostname = False
+context.verify_mode = ssl.CERT_NONE
+try:
+    with socket.create_connection((host, port), timeout=5) as connection:
+        with context.wrap_socket(connection) as tls:
+            peer_certificate = tls.getpeercert(binary_form=True)
+except OSError as exc:
+    fail("无法读取实际 HTTPS 监听证书（%s）" % exc)
+if not peer_certificate:
+    fail("实际 HTTPS 监听未返回证书")
+actual_fingerprint = hashlib.sha256(peer_certificate).hexdigest()
+if actual_fingerprint != expected_fingerprint:
+    fail("实际 HTTPS 监听证书与选定的面板证书不一致，请检查证书设置并重启面板后重新核验")
+print(actual_fingerprint)
+PY
+}
+
+report_agent_certificate() {
+    [[ "$XUI_ROLE" == agent ]] || return 0
+    local fingerprint
+    if fingerprint=$(verify_panel_certificate "$configured_panel_cert" /etc/xui/xui.db); then
+        echo "已核对面板实际 HTTPS 监听证书。"
+        echo "被控端 API 证书 SHA256 指纹（填入管理端）："
+        echo "$fingerprint"
+    fi
+    # Certificate verification must not undo an otherwise successful startup.
+    return 0
 }
 
 #This function will be called when user installed xui out of sercurity
@@ -301,6 +392,7 @@ install_xui() {
     rm -rf "$backup_dir"
 
     echo -e "${green}xui v${last_version}${plain} 安装完成，面板已启动，"
+    report_agent_certificate
     echo -e "发行页：${green}${XUI_RELEASES_PAGE}${plain}，后续升级从同一发行页获取。"
     echo -e ""
     echo -e "xui 管理脚本使用方法: "

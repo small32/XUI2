@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -91,16 +92,77 @@ func TestSubscriptionClashConfig(t *testing.T) {
 	if strings.Contains(joined, "URL-REGEX") {
 		t.Fatalf("不支持的规则类型没有被过滤:\n%s", joined)
 	}
-	// 分组名里的 emoji 直接输出，不要再变成 \U0001F680 这类转义
-	if strings.Contains(string(data), `\U0001F680`) {
-		t.Fatalf("emoji 仍被转义:\n%s", data)
-	}
-	if !strings.Contains(string(data), "🚀 节点选择") {
-		t.Fatalf("分组名缺少 emoji:\n%s", data)
-	}
+	// 分组名与规则里的 emoji 由上面的解析结果校验，YAML 转义方式不影响语义。
 	// 规则指向不存在的策略组时，Clash 会拒绝整份配置，这类规则必须丢弃
 	if strings.Contains(joined, "orphan.example.com") {
 		t.Fatalf("指向未知策略组的规则没有被丢弃:\n%s", joined)
+	}
+}
+
+func TestSubscriptionClashConfigPreservesStoredPasswords(t *testing.T) {
+	clientTestDB(t)
+	t.Setenv("XUI_ROLE", "agent")
+	SetSubscriptionRules([]byte(testSubscriptionRules))
+
+	passwords := []struct {
+		name  string
+		value string
+	}{
+		{"literal Unicode escape", `abc\U0001F680xyz`},
+		{"double quoted Unicode escape", `abc\U0001F680xyz🚀`},
+		{"double quoted escaped quote", `abc\U00000022xyz🚀`},
+		{"YAML special text", "\"quotes\": 'single' # comment: [a, b] {key: value} &anchor *alias !tag | > % @ \\path\tend"},
+	}
+	for protocolIndex, protocol := range []model.Protocol{model.Shadowsocks, model.Trojan} {
+		for passwordIndex, password := range passwords {
+			t.Run(string(protocol)+"/"+password.name, func(t *testing.T) {
+				settings := map[string]interface{}{"method": "aes-128-gcm", "password": password.value}
+				stream := `{}`
+				if protocol == model.Trojan {
+					settings = map[string]interface{}{"clients": []map[string]string{{"password": password.value}}}
+					stream = `{"security":"tls","tlsSettings":{"serverName":"panel.example.com"}}`
+				}
+				raw, err := json.Marshal(settings)
+				if err != nil {
+					t.Fatal(err)
+				}
+				in := &model.Inbound{
+					Port:           8443 + protocolIndex*len(passwords) + passwordIndex,
+					Tag:            t.Name(),
+					Protocol:       protocol,
+					Remark:         "测试节点",
+					Settings:       string(raw),
+					StreamSettings: stream,
+					Sniffing:       `{}`,
+				}
+				// 直接落库模拟旧入站：新增/修改密码的格式校验不应改变存量订阅。
+				if err := database.GetDB().Create(in).Error; err != nil {
+					t.Fatal(err)
+				}
+				stored, err := new(InboundService).GetInbound(in.Id)
+				if err != nil {
+					t.Fatal(err)
+				}
+				data, err := new(SubscriptionService).ClashConfig(stored, "panel.example.com:8201")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var cfg struct {
+					Proxies []struct {
+						Password string `yaml:"password"`
+					} `yaml:"proxies"`
+				}
+				if err := yaml.Unmarshal(data, &cfg); err != nil {
+					t.Fatalf("生成的 YAML 无法解析: %v\n%s", err, data)
+				}
+				if len(cfg.Proxies) != 1 {
+					t.Fatalf("节点数量不符: %d", len(cfg.Proxies))
+				}
+				if got := cfg.Proxies[0].Password; got != password.value {
+					t.Fatalf("存量密码被改写: got %q, want %q", got, password.value)
+				}
+			})
+		}
 	}
 }
 

@@ -85,6 +85,9 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) error {
 	if err := ValidateInboundPayload(inbound); err != nil {
 		return err
 	}
+	if err := validateInboundPasswords(inbound, nil); err != nil {
+		return err
+	}
 	exist, err := s.checkPortExist(inbound.Port, 0)
 	if err != nil {
 		return err
@@ -98,6 +101,12 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) error {
 
 func (s *InboundService) AddInbounds(inbounds []*model.Inbound) (err error) {
 	for _, inbound := range inbounds {
+		if err := ValidateInboundPayload(inbound); err != nil {
+			return err
+		}
+		if err := validateInboundPasswords(inbound, nil); err != nil {
+			return err
+		}
 		exist, err := s.checkPortExist(inbound.Port, 0)
 		if err != nil {
 			return err
@@ -271,6 +280,9 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		oldInbound := &model.Inbound{}
 		if err := tx.Where("id = ?", inbound.Id).First(oldInbound).Error; err != nil {
+			return err
+		}
+		if err := validateInboundPasswords(inbound, oldInbound); err != nil {
 			return err
 		}
 		disabledBy := oldInbound.DisabledBy

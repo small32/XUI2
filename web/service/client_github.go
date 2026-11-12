@@ -202,6 +202,9 @@ func clientReleasePlatform(filename string) (string, string) {
 	return platform, arch
 }
 func (s *ClientService) GitHubRelease(ctx context.Context, force bool) (*ClientGitHubRelease, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	settings, err := s.Settings()
 	if err != nil {
 		return nil, err
@@ -222,11 +225,19 @@ func (s *ClientService) GitHubRelease(ctx context.Context, force bool) (*ClientG
 	entry := value.(*clientGitHubCacheEntry)
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if force || time.Now().After(entry.nextCheck) {
 		token, err := s.GitHubAccessToken(ctx, settings)
 		var result *ClientGitHubRelease
 		if err == nil {
 			result, err = fetchClientGitHubRelease(ctx, newClientGitHubHTTPClient(false), "https://api.github.com", repo, token)
+		}
+		// A caller's cancellation must not become a shared GitHub failure.
+		// The fetch helpers may replace the original context error.
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		entry.err = err
 		entry.nextCheck = time.Now().Add(time.Minute)

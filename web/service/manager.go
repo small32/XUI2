@@ -197,8 +197,8 @@ func (s *ServerManagementService) SaveNode(input NodeInput) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return errors.New("API 地址必须是 HTTPS 站点根地址")
 	}
-	if strings.TrimSpace(input.Name) == "" || strings.TrimSpace(input.Address) == "" {
-		return errors.New("节点名称和订阅地址不能为空")
+	if strings.TrimSpace(input.Address) == "" {
+		return errors.New("订阅地址不能为空")
 	}
 	pin := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(input.CertSHA256), ":", ""))
 	if pin != "" {
@@ -216,6 +216,9 @@ func (s *ServerManagementService) SaveNode(input NodeInput) error {
 			return err
 		}
 	}
+	if !validNodeName(input.Name) && !(input.ID > 0 && input.Name == node.Name) {
+		return errors.New("节点名称只允许大小写字母、数字、- 和 _，不能使用 Clash 保留名 DIRECT、REJECT、REJECT-DROP、COMPATIBLE、PASS、PASS-RULE、GLOBAL")
+	}
 	if input.Token != "" {
 		node.Token = input.Token
 	}
@@ -231,7 +234,7 @@ func (s *ServerManagementService) SaveNode(input NodeInput) error {
 		return errors.New("已有节点的 API 地址不能修改；请先删除旧节点并确认远端账号已清理，再添加新节点")
 	}
 	oldEnabled := node.Enabled
-	node.Name, node.URL, node.Address, node.CertSHA256, node.Enabled = strings.TrimSpace(input.Name), newURL, hostOnlyAddress(input.Address), pin, input.Enabled
+	node.Name, node.URL, node.Address, node.CertSHA256, node.Enabled = input.Name, newURL, hostOnlyAddress(input.Address), pin, input.Enabled
 	if node.Enabled {
 		var capability struct {
 			APIVersion int `json:"apiVersion"`
@@ -778,13 +781,17 @@ func (s *ServerManagementService) DispatchPending() error {
 					if err := tx.Where("node_id = ? AND account_id = ? AND yyyymm = ?", snap.NodeID, snap.AccountID, snap.Yyyymm).FirstOrCreate(&snap).Error; err != nil {
 						return err
 					}
-					var total struct{ Up, Down int64 }
-					if err := tx.Model(&model.NodeTrafficSnapshot{}).Where("account_id = ? AND yyyymm = ?", task.AccountID, period).
-						Select("COALESCE(SUM(up), 0) AS up, COALESCE(SUM(down), 0) AS down").Scan(&total).Error; err != nil {
+					var snapshots []model.NodeTrafficSnapshot
+					if err := tx.Where("account_id = ? AND yyyymm = ?", task.AccountID, period).Find(&snapshots).Error; err != nil {
 						return err
 					}
+					var up, down int64
+					for _, snapshot := range snapshots {
+						up = sumTraffic(up, snapshot.Up)
+						down = sumTraffic(down, snapshot.Down)
+					}
 					return tx.Model(&model.TrafficSnapshot{}).Where("inbound_id = ? AND yyyymm = ?", task.AccountID, period).
-						Updates(map[string]interface{}{"remote_up": total.Up, "remote_down": total.Down}).Error
+						Updates(map[string]interface{}{"remote_up": up, "remote_down": down}).Error
 				})
 			}
 		}

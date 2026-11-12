@@ -226,12 +226,9 @@ func (s *ClientService) Account(in *model.Inbound, baseURL string) (*ClientAccou
 	if err != nil {
 		return nil, err
 	}
-	v := &ClientAccount{Port: in.Port, Remark: in.Remark, UsedBytes: rows[0].Total, ActualUsedBytes: in.Up + in.Down, TotalBytes: in.Total, Unlimited: in.Total <= 0, MonthlyReset: in.MonthlyReset, Status: "active", CanProxy: true, RenewalDays: []int{14, 7, 3}}
+	v := &ClientAccount{Port: in.Port, Remark: in.Remark, UsedBytes: rows[0].Total, ActualUsedBytes: sumTraffic(in.Up, in.Down), TotalBytes: in.Total, Unlimited: in.Total <= 0, MonthlyReset: in.MonthlyReset, Status: "active", CanProxy: true, RenewalDays: []int{14, 7, 3}}
 	if !v.Unlimited {
-		remaining := in.Total - v.UsedBytes
-		if remaining < 0 {
-			remaining = 0
-		}
+		remaining := remainingTraffic(in.Total, v.UsedBytes)
 		v.RemainingBytes = &remaining
 	}
 	if in.ExpiryTime > 0 {
@@ -262,7 +259,7 @@ func (s *ClientService) Account(in *model.Inbound, baseURL string) (*ClientAccou
 		return nil, err
 	}
 	for _, reading := range raw {
-		v.ActualUsedBytes += reading.Up + reading.Down
+		v.ActualUsedBytes = sumTraffic(v.ActualUsedBytes, reading.Up, reading.Down)
 	}
 	for _, node := range usage {
 		if node.ObservedAt <= 0 || node.LastError != "" || time.Since(time.Unix(node.ObservedAt, 0)) > time.Duration(settings.HeartbeatMinutes*2)*time.Minute {

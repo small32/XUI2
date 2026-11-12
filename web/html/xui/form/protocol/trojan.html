@@ -1,7 +1,8 @@
 {{define "form/trojan"}}
 <a-form layout="inline">
     <a-form-item label="密码">
-        <a-input v-model.trim="inbound.settings.clients[0].password" :disabled="role==='manager'"></a-input>
+        <a-input v-model="inbound.settings.clients[0].password" :disabled="role==='manager'"></a-input>
+        <inbound-password-help :legacy="hasLegacyPassword(inbound)"></inbound-password-help>
     </a-form-item>
 </a-form>
 

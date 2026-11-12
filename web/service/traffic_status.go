@@ -14,7 +14,7 @@ const (
 // 传入的是管理端记录的用量与所有被控端的汇总用量。
 // limit <= 0 表示不限量，永远不会超限。
 func TrafficOverlimit(local, remote, limit int64) bool {
-	return limit > 0 && local+remote >= limit
+	return limit > 0 && sumTraffic(local, remote) >= limit
 }
 
 // TrafficStatusOf 把“是否启用”与“是否超限”归到三态之一，三者互斥且完备：

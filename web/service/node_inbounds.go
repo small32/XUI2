@@ -175,6 +175,13 @@ func ImportNodeInbound(in model.Inbound, overwrite bool) error {
 			}
 			in.UserId = owner.Id
 		}
+		var previous *model.Inbound
+		if existing.Id != 0 {
+			previous = &existing
+		}
+		if err := validateInboundPasswords(&in, previous); err != nil {
+			return err
+		}
 		return tx.Save(&in).Error
 	})
 }

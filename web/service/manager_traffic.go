@@ -53,7 +53,7 @@ func (s *ServerManagementService) ListNodes() ([]entity.NodeRow, error) {
 		}
 		row.InboundCount = len(readings)
 		for _, reading := range readings {
-			row.Used += scaledNodeTraffic(reading.Up, n) + scaledNodeTraffic(reading.Down, n)
+			row.Used = sumTraffic(row.Used, scaledNodeTraffic(reading.Up, n), scaledNodeTraffic(reading.Down, n))
 			if reading.Enabled {
 				row.EnabledCount++
 			}
@@ -85,10 +85,10 @@ func (s *ServerManagementService) NodeUsage(port int) ([]NodeUsage, error) {
 		row := model.NodeTraffic{Enabled: len(readings) > 0}
 		var used int64
 		for _, reading := range readings {
-			used += scaledNodeTraffic(reading.Up, node) + scaledNodeTraffic(reading.Down, node)
+			used = sumTraffic(used, scaledNodeTraffic(reading.Up, node), scaledNodeTraffic(reading.Down, node))
 			row.Port = reading.Port
-			row.Up += reading.Up
-			row.Down += reading.Down
+			row.Up = sumTraffic(row.Up, reading.Up)
+			row.Down = sumTraffic(row.Down, reading.Down)
 			row.Enabled = row.Enabled && reading.Enabled
 			if reading.ObservedAt > row.ObservedAt {
 				row.ObservedAt = reading.ObservedAt
@@ -97,7 +97,8 @@ func (s *ServerManagementService) NodeUsage(port int) ([]NodeUsage, error) {
 				row.DisabledBy = reading.DisabledBy
 			}
 		}
-		out = append(out, NodeUsage{NodeID: node.Id, Name: node.Name, RemotePort: row.Port, Up: row.Up, Down: row.Down, TrafficMultiplier: nodeTrafficMultiplier(node), ActualUsed: row.Up + row.Down, ActualUsedText: FormatTrafficSize(row.Up + row.Down), Used: used, UsedText: FormatTrafficSize(used), Enabled: row.Enabled, DisabledBy: row.DisabledBy, ObservedAt: row.ObservedAt, LastError: node.LastError})
+		actualUsed := sumTraffic(row.Up, row.Down)
+		out = append(out, NodeUsage{NodeID: node.Id, Name: node.Name, RemotePort: row.Port, Up: row.Up, Down: row.Down, TrafficMultiplier: nodeTrafficMultiplier(node), ActualUsed: actualUsed, ActualUsedText: FormatTrafficSize(actualUsed), Used: used, UsedText: FormatTrafficSize(used), Enabled: row.Enabled, DisabledBy: row.DisabledBy, ObservedAt: row.ObservedAt, LastError: node.LastError})
 	}
 	return out, nil
 }
@@ -221,9 +222,9 @@ func (s *ServerManagementService) getTrafficCache() ([]*entity.ServerTraffic, er
 			v = &entity.ServerTraffic{Port: port, Enable: true}
 			by[port] = v
 		}
-		v.Up += row.Up
-		v.Down += row.Down
-		v.Used += row.Up + row.Down
+		v.Up = sumTraffic(v.Up, row.Up)
+		v.Down = sumTraffic(v.Down, row.Down)
+		v.Used = sumTraffic(v.Used, row.Up, row.Down)
 		v.Enable = v.Enable && row.Enabled
 	}
 	out := make([]*entity.ServerTraffic, 0, len(by))
@@ -369,7 +370,8 @@ func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSumma
 			known = true
 			remoteEnabled = remoteEnabled && reading.Enabled
 		}
-		local := in.Up + in.Down
+		local := sumTraffic(in.Up, in.Down)
+		total := sumTraffic(local, used)
 		over := TrafficOverlimit(local, used, in.Total)
 		enabled := in.Enable && remoteEnabled
 		status := TrafficStatusOf(enabled, over)
@@ -377,9 +379,9 @@ func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSumma
 			status = "unknown"
 		}
 		out = append(out, &entity.TrafficSummary{InboundId: in.Id, Username: in.Remark, Port: in.Port,
-			Local: local, Remote: used, Total: local + used, Limit: in.Total, ExpiryTime: in.ExpiryTime, Enable: enabled,
+			Local: local, Remote: used, Total: total, Limit: in.Total, ExpiryTime: in.ExpiryTime, Enable: enabled,
 			MonthlyReset: in.MonthlyReset, Overlimit: over, Status: status,
-			LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(local + used), LimitText: FormatTrafficLimit(in.Total)})
+			LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(total), LimitText: FormatTrafficLimit(in.Total)})
 	}
 	if inboundID == 0 {
 		for _, node := range nodes {
@@ -387,13 +389,14 @@ func (s *ServerManagementService) summary(inboundID int) ([]*entity.TrafficSumma
 				if reading.NodeID != node.Id || reading.AccountID >= 0 || managedPorts[reading.Port] {
 					continue
 				}
-				used := scaledNodeTraffic(reading.Up, node) + scaledNodeTraffic(reading.Down, node)
+				used := sumTraffic(scaledNodeTraffic(reading.Up, node), scaledNodeTraffic(reading.Down, node))
+				actualUsed := sumTraffic(reading.Up, reading.Down)
 				over := TrafficOverlimit(used, 0, reading.Total)
 				status := TrafficStatusOf(reading.Enabled, over)
 				if node.LastError != "" || !node.Enabled || time.Since(time.Unix(reading.ObservedAt, 0)) > time.Duration(setting.HeartbeatMinutes*2)*time.Minute {
 					status = "unknown"
 				}
-				out = append(out, &entity.TrafficSummary{NodeID: node.Id, NodeName: node.Name, TrafficMultiplier: nodeTrafficMultiplier(node), ActualUsed: reading.Up + reading.Down, ActualUsedText: FormatTrafficSize(reading.Up + reading.Down), LocalInboundID: -reading.AccountID, Username: reading.Username, Port: reading.Port, Remote: used, Total: used, Limit: reading.Total, ExpiryTime: reading.ExpiryTime, Enable: reading.Enabled, MonthlyReset: reading.MonthlyReset, Overlimit: over, Status: status, LocalText: FormatTrafficSize(0), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(used), LimitText: FormatTrafficLimit(reading.Total), Up: reading.Up, Down: reading.Down, ObservedAt: reading.ObservedAt, LastError: node.LastError})
+				out = append(out, &entity.TrafficSummary{NodeID: node.Id, NodeName: node.Name, TrafficMultiplier: nodeTrafficMultiplier(node), ActualUsed: actualUsed, ActualUsedText: FormatTrafficSize(actualUsed), LocalInboundID: -reading.AccountID, Username: reading.Username, Port: reading.Port, Remote: used, Total: used, Limit: reading.Total, ExpiryTime: reading.ExpiryTime, Enable: reading.Enabled, MonthlyReset: reading.MonthlyReset, Overlimit: over, Status: status, LocalText: FormatTrafficSize(0), RemoteText: FormatTrafficSize(used), TotalText: FormatTrafficSize(used), LimitText: FormatTrafficLimit(reading.Total), Up: reading.Up, Down: reading.Down, ObservedAt: reading.ObservedAt, LastError: node.LastError})
 			}
 		}
 	}
@@ -521,8 +524,8 @@ func (s *ServerManagementService) MaybeMonthlyReset() error {
 			}
 			var up, down int64
 			for _, snapshot := range snapshots {
-				up += snapshot.Up
-				down += snapshot.Down
+				up = sumTraffic(up, snapshot.Up)
+				down = sumTraffic(down, snapshot.Down)
 			}
 			var existing int64
 			if err := tx.Model(&model.TrafficSnapshot{}).Where("inbound_id = ? AND yyyymm = ?", in.Id, period).Count(&existing).Error; err != nil {
@@ -612,7 +615,7 @@ func (s *ServerManagementService) TrafficResetSnapshots(inboundID int) (*entity.
 				name = "节点"
 			}
 			label := fmt.Sprintf("%s (#%d)", name, snap.NodeID)
-			usage[key] += snap.Up + snap.Down
+			usage[key] = sumTraffic(usage[key], snap.Up, snap.Down)
 			labels[key] = label
 			columnSet[label] = true
 		}
@@ -624,8 +627,9 @@ func (s *ServerManagementService) TrafficResetSnapshots(inboundID int) (*entity.
 	sort.Strings(columns)
 	out := make([]*entity.TrafficSnapshot, 0, len(rows))
 	for _, row := range rows {
-		local, remote := row.LocalUp+row.LocalDown, row.RemoteUp+row.RemoteDown
-		item := &entity.TrafficSnapshot{Yyyymm: row.Yyyymm, Period: YyyymmPeriod(row.Yyyymm), InboundId: row.InboundId, Port: row.Port, Remark: row.Remark, Local: local, Remote: remote, Used: local + remote, Limit: row.Total, LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(remote), UsedText: FormatTrafficSize(local + remote), LimitText: FormatTrafficLimit(row.Total), ResetAt: row.ResetAt}
+		local, remote := sumTraffic(row.LocalUp, row.LocalDown), sumTraffic(row.RemoteUp, row.RemoteDown)
+		used := sumTraffic(local, remote)
+		item := &entity.TrafficSnapshot{Yyyymm: row.Yyyymm, Period: YyyymmPeriod(row.Yyyymm), InboundId: row.InboundId, Port: row.Port, Remark: row.Remark, Local: local, Remote: remote, Used: used, Limit: row.Total, LocalText: FormatTrafficSize(local), RemoteText: FormatTrafficSize(remote), UsedText: FormatTrafficSize(used), LimitText: FormatTrafficLimit(row.Total), ResetAt: row.ResetAt}
 		for key, used := range usage {
 			if key.month != row.Yyyymm || key.account != row.InboundId {
 				continue

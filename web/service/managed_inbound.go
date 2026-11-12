@@ -25,6 +25,13 @@ func UpsertManagedInbound(in model.Inbound) error {
 		if errors.Is(err, gorm.ErrRecordNotFound) && portErr == nil {
 			existing = occupied
 		}
+		var previous *model.Inbound
+		if existing.Id != 0 {
+			previous = &existing
+		}
+		if err := validateInboundPasswords(&in, previous); err != nil {
+			return err
+		}
 		if existing.Id == 0 {
 			var owner model.User
 			if err := tx.Where("username = ?", model.AdminUsername).First(&owner).Error; err != nil {

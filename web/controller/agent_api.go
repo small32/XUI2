@@ -72,7 +72,9 @@ func apiPort(c *gin.Context) (int, bool) {
 }
 
 func apiError(c *gin.Context, err error) {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, service.ErrInboundPassword) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	} else if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(404, gin.H{"error": "inbound not found"})
 	} else {
 		c.JSON(500, gin.H{"error": err.Error()})

@@ -6,11 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
-	"unicode"
 
 	"gopkg.in/yaml.v2"
 	"xui/config"
@@ -175,26 +173,7 @@ func (s *SubscriptionService) ClashConfig(in *model.Inbound, fallbackHost string
 		"proxy-groups": groups,
 		"rules":        out,
 	}
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return unescapeYAMLUnicode(data), nil
-}
-
-// yamlUnicodeEscape 匹配 yaml.v2 为非 BMP 字符输出的 \U 八位转义。
-var yamlUnicodeEscape = regexp.MustCompile(`\\U([0-9A-Fa-f]{8})`)
-
-// unescapeYAMLUnicode 把 \U0001F680 这类转义还原成真实字符。两种写法 Mihomo 都认，
-// 但配置文件是给人排查的，满屏转义码不好读。
-func unescapeYAMLUnicode(in []byte) []byte {
-	return yamlUnicodeEscape.ReplaceAllFunc(in, func(m []byte) []byte {
-		v, err := strconv.ParseUint(string(m[2:]), 16, 32)
-		if err != nil || v > unicode.MaxRune {
-			return m
-		}
-		return []byte(string(rune(v)))
-	})
+	return yaml.Marshal(cfg)
 }
 
 // knownSubGroup 判断规则里的策略组是不是面板生成的那几个，
@@ -211,6 +190,7 @@ func knownSubGroup(name string) bool {
 func clashProxies(in *model.Inbound, fallbackHost string) ([]map[string]interface{}, []string, error) {
 	proxies := []map[string]interface{}{}
 	names := []string{}
+	used := clashNameSet(subGroupProxy, subGroupAuto, subGroupDirect, subGroupBlock, subGroupFinal)
 	if config.Role() != "manager" {
 		host := hostOnlyAddress(fallbackHost)
 		if host == "" {
@@ -220,6 +200,7 @@ func clashProxies(in *model.Inbound, fallbackHost string) ([]map[string]interfac
 		if name == "" {
 			name = "XUI"
 		}
+		name = claimClashName(used, name, in.Id)
 		p, err := clashProxy(in, host, name)
 		if err != nil {
 			return nil, nil, err
@@ -230,7 +211,6 @@ func clashProxies(in *model.Inbound, fallbackHost string) ([]map[string]interfac
 	if err != nil {
 		return nil, nil, err
 	}
-	used := map[string]bool{subGroupProxy: true, subGroupAuto: true, subGroupDirect: true, subGroupBlock: true, subGroupFinal: true, "DIRECT": true, "REJECT": true, "GLOBAL": true}
 	for _, node := range nodes {
 		if !node.Enabled || !in.TargetsNode(node.Id) {
 			continue
@@ -248,10 +228,7 @@ func clashProxies(in *model.Inbound, fallbackHost string) ([]map[string]interfac
 		if name == "" {
 			name = fmt.Sprintf("节点 %d", node.Id)
 		}
-		if used[name] {
-			name = fmt.Sprintf("%s · %d", name, node.Id)
-		}
-		used[name] = true
+		name = claimClashName(used, name, node.Id)
 		p, err := clashProxy(desired, address, name)
 		if err != nil {
 			return nil, nil, fmt.Errorf("%s: %w", node.Name, err)

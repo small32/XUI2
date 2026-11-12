@@ -24,7 +24,7 @@
 </a-table>
 <a-divider>[[node.id?'编辑被控端':'添加被控端']]</a-divider>
 <a-form layout="vertical">
-<a-form-item label="节点名称"><a-input v-model.trim="node.name" placeholder="用于订阅节点名称"></a-input></a-form-item>
+<a-form-item label="节点名称"><a-input v-model="node.name" placeholder="用于订阅节点名称"></a-input><span>仅限 ASCII 英文字母、数字、-、_，不允许空格或换行。保留名（区分大小写）：DIRECT、REJECT、REJECT-DROP、COMPATIBLE、PASS、PASS-RULE、GLOBAL。</span><a-alert v-if="legacyNodeName" type="warning" show-icon :message="'旧名称「'+originalNodeName+'」不符合新规范；保持原名可修改其它设置，更名须符合上述规范。'" style="margin-top:8px"></a-alert></a-form-item>
 <a-form-item label="API 地址"><a-input v-model.trim="node.url" :disabled="!!node.id" placeholder="https://node.example.com:54321"></a-input></a-form-item>
 <a-form-item label="订阅地址"><a-input v-model.trim="node.address" placeholder="node.example.com"></a-input></a-form-item>
 <a-form-item label="被控端 API 令牌"><a-input-password v-model="node.token" placeholder="编辑时留空则保留原令牌"></a-input-password></a-form-item>
@@ -56,11 +56,12 @@
 {{template "nodeInboundBrowser" .}}
 <script>
 const emptyNode=()=>({id:0,name:'',url:'',address:'',token:'',certSha256:'',enabled:true,trafficMultiplier:1});
-new Vue({delimiters:['[[',']]'],el:'#app',data:{siderDrawer,loading:false,nodes:[],tasks:[],node:emptyNode(),setting:{autoDisable:true,heartbeatMinutes:10}},computed:{pendingCount(){return this.tasks.filter(t=>t.status==='pending').length;},abandonedCount(){return this.tasks.filter(t=>t.status==='abandoned').length;}},methods:{
+const validNodeName=name=>typeof name==='string'&&name.length>0&&!/[^A-Za-z0-9_-]/.test(name)&&!['DIRECT','REJECT','REJECT-DROP','COMPATIBLE','PASS','PASS-RULE','GLOBAL'].includes(name);
+new Vue({delimiters:['[[',']]'],el:'#app',data:{siderDrawer,loading:false,nodes:[],tasks:[],node:emptyNode(),originalNodeName:null,setting:{autoDisable:true,heartbeatMinutes:10}},computed:{pendingCount(){return this.tasks.filter(t=>t.status==='pending').length;},abandonedCount(){return this.tasks.filter(t=>t.status==='abandoned').length;},legacyNodeName(){return !!this.node.id&&this.originalNodeName!==null&&!validNodeName(this.originalNodeName);}},methods:{
  async load(){let [nodes,tasks,setting]=await Promise.all([HttpUtil.post('/xui/server/nodes/list'),HttpUtil.post('/xui/server/tasks'),HttpUtil.post('/xui/server/setting/all')]);if(nodes.success)this.nodes=nodes.obj||[];if(tasks.success)this.tasks=tasks.obj||[];if(setting.success)this.setting=setting.obj;},
- edit(row){this.node={id:row.id,name:row.name,url:row.url,address:row.address,token:'',certSha256:row.certSha256||'',enabled:row.enabled,trafficMultiplier:row.trafficMultiplier == null ? 1 : row.trafficMultiplier};},
- resetForm(){this.node=emptyNode();},
- async saveNode(){if(typeof this.node.trafficMultiplier !== 'number'||!Number.isFinite(this.node.trafficMultiplier)||this.node.trafficMultiplier<0){this.$message.error('流量倍率必须是非负数字');return;}this.loading=true;let m=await HttpUtil.post('/xui/server/nodes/save',this.node);this.loading=false;if(m.success){this.$message.success('已保存');this.resetForm();this.load();}else this.$message.error(m.msg);},
+ edit(row){this.originalNodeName=row.name;this.node={id:row.id,name:row.name,url:row.url,address:row.address,token:'',certSha256:row.certSha256||'',enabled:row.enabled,trafficMultiplier:row.trafficMultiplier == null ? 1 : row.trafficMultiplier};},
+ resetForm(){this.node=emptyNode();this.originalNodeName=null;},
+ async saveNode(){if(!validNodeName(this.node.name)&&!(this.node.id&&this.originalNodeName!==null&&this.node.name===this.originalNodeName)){this.$message.error('节点名称仅允许 ASCII 英文字母、数字、-、_，且不能使用保留名');return;}if(typeof this.node.trafficMultiplier !== 'number'||!Number.isFinite(this.node.trafficMultiplier)||this.node.trafficMultiplier<0){this.$message.error('流量倍率必须是非负数字');return;}this.loading=true;let m=await HttpUtil.post('/xui/server/nodes/save',this.node);this.loading=false;if(m.success){this.$message.success('已保存');this.resetForm();this.load();}else this.$message.error(m.msg);},
  async remove(row){let m=await HttpUtil.post('/xui/server/nodes/delete/'+row.id);if(m.success){this.$message.success('已删除');this.load();}else this.$message.error(m.msg);},
  async forceRemove(row){let m=await HttpUtil.post('/xui/server/nodes/force-delete/'+row.id);if(m.success){this.$message.success('已强制移除，请确认旧服务器账号已人工清理');this.load();}else this.$message.error(m.msg);},
  async saveSetting(){let m=await HttpUtil.post('/xui/server/setting',this.setting);if(m.success)this.$message.success('已保存');else this.$message.error(m.msg);},

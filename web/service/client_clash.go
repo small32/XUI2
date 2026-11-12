@@ -18,7 +18,7 @@ func (s *ClientService) ClashConfig(in *model.Inbound, baseURL string) ([]byte, 
 	}
 	proxies := []map[string]interface{}{}
 	names := []string{}
-	usedNames := map[string]bool{"XUI代理": true, "DIRECT": true, "GLOBAL": true, "REJECT": true}
+	usedNames := clashNameSet("XUI代理")
 	for _, node := range nodes {
 		if !node.Enabled || !in.TargetsNode(node.Id) {
 			continue
@@ -31,10 +31,7 @@ func (s *ClientService) ClashConfig(in *model.Inbound, baseURL string) ([]byte, 
 		if name == "" {
 			name = fmt.Sprintf("节点 %d", node.Id)
 		}
-		if usedNames[name] {
-			name = fmt.Sprintf("%s · %d", name, node.Id)
-		}
-		usedNames[name] = true
+		name = claimClashName(usedNames, name, node.Id)
 		p, err := clashProxy(desired, hostOnlyAddress(node.Address), name)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", node.Name, err)

@@ -14,6 +14,7 @@
     {{template "form/inbound" $}}
     <a-form-item v-if="role==='manager'" label="账号统一密码">
         <a-input-password v-model="inModal.sharedPassword" placeholder="所有带密码协议使用此密码；VLESS/VMess 不使用"></a-input-password>
+        <inbound-password-help :legacy="hasLegacySharedPassword()"></inbound-password-help>
     </a-form-item>
     <a-form-item v-if="role==='manager'" label="下发被控端">
         <a-checkbox v-model="inModal.allNodes">所有被控端（含以后新增的节点）</a-checkbox>
@@ -28,7 +29,7 @@
         <a-tabs>
             <a-tab-pane v-for="node in inModal.nodes.filter(n=>inModal.allNodes||inModal.selectedNodes.includes(n.id))" :key="node.id" :tab="node.name">
                 <a-checkbox :checked="!!inModal.overrides[node.id]" @change="e=>toggleOverride(node.id,e.target.checked)">为此被控端单独设置协议</a-checkbox>
-                <node-protocol-editor v-if="inModal.overrides[node.id]" :key="inModal.session+':'+node.id" :base="inModal.inbound" :initial="inModal.overrides[node.id]" :shared-password="inModal.sharedPassword" @change="value=>$set(inModal.overrides,node.id,value)"></node-protocol-editor>
+                <node-protocol-editor v-if="inModal.overrides[node.id]" :key="inModal.session+':'+node.id" :base="inModal.inbound" :initial="inModal.overrides[node.id]" :shared-password="inModal.effectiveSharedPassword()" :original-passwords="inModal.originalPasswords.nodes[node.id]" :original-shared-password="inModal.originalPasswords.shared" @change="value=>$set(inModal.overrides,node.id,value)"></node-protocol-editor>
                 <p v-else>使用上方默认协议和连接设置。</p>
             </a-tab-pane>
         </a-tabs>
@@ -42,6 +43,33 @@
         if(inbound.protocol===Protocols.SOCKS||inbound.protocol===Protocols.HTTP){inbound.settings.accounts.forEach(a=>a.pass=password);if(inbound.protocol===Protocols.SOCKS)inbound.settings.auth='password';}
     }
     function nodeEditorConfig(inbound){return {protocol:inbound.protocol,listen:inbound.listen,settings:inbound.settings.toString(),streamSettings:inbound.stream.toString(),sniffing:inbound.canSniffing()?inbound.sniffing.toString():'{}'};}
+    function validInboundPassword(password){
+        return typeof password==='string'&&password.length>0&&!/[^A-Za-z0-9_-]/.test(password);
+    }
+    function editorPasswordConfig(inbound,password=''){
+        const config={protocol:inbound.protocol,settings:typeof inbound.settings==='string'?JSON.parse(inbound.settings):JSON.parse(JSON.stringify(inbound.settings))};
+        if(config.protocol===Protocols.SOCKS&&!config.settings.accounts)config.settings.accounts=[];
+        applyEditorPassword(config,password);
+        return config;
+    }
+    function inboundPasswordSnapshot(inbound,password=''){
+        const config=editorPasswordConfig(inbound,password);
+        const settings=config.settings;
+        let passwords=[];
+        if(config.protocol===Protocols.TROJAN)passwords=(settings.clients||[]).map(client=>client.password);
+        if(config.protocol===Protocols.SHADOWSOCKS)passwords=[settings.password];
+        if(config.protocol===Protocols.HTTP||(config.protocol===Protocols.SOCKS&&settings.auth==='password'))passwords=(settings.accounts||[]).map(account=>account.pass);
+        return {protocol:config.protocol,passwords};
+    }
+    function unchangedInboundPassword(current,original,index,commonPassword=null){
+        return (commonPassword!==null&&current.passwords[index]===commonPassword)||(!!original&&current.protocol===original.protocol&&index<original.passwords.length&&current.passwords[index]===original.passwords[index]);
+    }
+    function hasInvalidPasswordChange(current,original,commonPassword=null){
+        return current.passwords.some((password,index)=>!validInboundPassword(password)&&!unchangedInboundPassword(current,original,index,commonPassword));
+    }
+    function hasLegacyInboundPassword(current,original,commonPassword=null){
+        return current.passwords.some((password,index)=>!validInboundPassword(password)&&unchangedInboundPassword(current,original,index,commonPassword));
+    }
 
     const inModal = {
         title: '',
@@ -56,10 +84,38 @@
         nodes: [],
         overrides: {},
         sharedPassword: '',
+        originalPasswords: {default:null,nodes:{},shared:null},
         session: 0,
+        effectiveSharedPassword(){
+            return this.sharedPassword||this.inbound.password||'';
+        },
+        unchangedSharedPassword(){
+            const password=this.effectiveSharedPassword();
+            return password&&password===this.originalPasswords.shared?password:null;
+        },
         ok() {
+            const password=role==='manager'?inModal.effectiveSharedPassword():'';
+            const unchangedSharedPassword=role==='manager'?inModal.unchangedSharedPassword():null;
+            if(role==='manager'&&password&&!validInboundPassword(password)&&password!==inModal.originalPasswords.shared){
+                Vue.prototype.$message.error('新建或修改的账号统一密码只能包含大小写字母、数字、下划线（_）和减号（-）');
+                return;
+            }
+            const current=inboundPasswordSnapshot(inModal.inbound,password);
+            if(hasInvalidPasswordChange(current,inModal.originalPasswords.default,unchangedSharedPassword)){
+                Vue.prototype.$message.error('新建或修改的密码不能为空，且只能包含大小写字母、数字、下划线（_）和减号（-）');
+                return;
+            }
             if(role==='manager'){
-                applyEditorPassword(inModal.inbound,inModal.sharedPassword);
+                for(const id of Object.keys(inModal.overrides)){
+                    if(hasInvalidPasswordChange(inboundPasswordSnapshot(inModal.overrides[id],password),inModal.originalPasswords.nodes[id],unchangedSharedPassword)){
+                        const node=inModal.nodes.find(node=>String(node.id)===id);
+                        Vue.prototype.$message.error('被控端“'+(node?node.name:id)+'”的新建或修改密码不能为空，且只能包含大小写字母、数字、下划线（_）和减号（-）');
+                        return;
+                    }
+                }
+            }
+            if(role==='manager'){
+                applyEditorPassword(inModal.inbound,password);
                 inModal.dbInbound.targetNodes=inModal.allNodes?'':JSON.stringify(inModal.selectedNodes);
                 inModal.dbInbound.nodeConfigs=JSON.stringify(inModal.overrides);
                 inModal.dbInbound.sharedPassword=inModal.sharedPassword;
@@ -83,6 +139,13 @@
             this.selectedNodes=this.allNodes?[]:JSON.parse(this.dbInbound.targetNodes);
             this.overrides=this.dbInbound.nodeConfigs?JSON.parse(this.dbInbound.nodeConfigs):{};
             this.sharedPassword=this.dbInbound.sharedPassword||this.inbound.password||'';
+            const password=role==='manager'?this.effectiveSharedPassword():'';
+            this.originalPasswords={default:null,nodes:{},shared:null};
+            if(this.dbInbound.id){
+                this.originalPasswords.shared=password;
+                this.originalPasswords.default=inboundPasswordSnapshot(this.inbound,password);
+                Object.keys(this.overrides).forEach(id=>{this.originalPasswords.nodes[id]=inboundPasswordSnapshot(this.overrides[id],password);});
+            }
             this.session++;
             if(role==='manager'){
                 const nodes=await HttpUtil.post('/xui/server/nodes/list');
@@ -116,11 +179,15 @@
         SOCKS: Protocols.SOCKS,
         HTTP: Protocols.HTTP,
     };
+    Vue.component('inbound-password-help',{
+        props:['legacy'],
+        template:'<div style="font-size:12px;line-height:1.6;max-width:360px"><div>新建或修改密码仅可使用大小写字母、数字、下划线（_）和减号（-），且不能为空。</div><div v-if="legacy" style="color:#d48806">旧密码不符合新规范；保持原值可继续保存，修改时需遵循新规范。</div></div>'
+    });
     Vue.component('node-protocol-editor',{
-        template:'#node-protocol-editor',delimiters:['[[',']]'],props:['base','initial','sharedPassword'],
+        template:'#node-protocol-editor',delimiters:['[[',']]'],props:['base','initial','sharedPassword','originalPasswords','originalSharedPassword'],
         data(){const json=this.base.toJson();const c=this.initial;return {role:'manager',Protocols:protocols,SSMethods,FLOW_CONTROL,inbound:Inbound.fromJson({...json,protocol:c.protocol,listen:c.listen,settings:JSON.parse(c.settings),streamSettings:JSON.parse(c.streamSettings),sniffing:JSON.parse(c.sniffing)})};},
         watch:{inbound:{deep:true,handler(){this.publish();}},sharedPassword(){this.publish();}},
-        methods:{publish(){applyEditorPassword(this.inbound,this.sharedPassword);this.$emit('change',nodeEditorConfig(this.inbound));},streamNetworkChange(oldValue){if(oldValue==='kcp')this.inbound.tls=false;}},
+        methods:{hasLegacyPassword(inbound){return hasLegacyInboundPassword(inboundPasswordSnapshot(inbound,this.sharedPassword),this.originalPasswords,this.sharedPassword&&this.sharedPassword===this.originalSharedPassword?this.sharedPassword:null);},publish(){applyEditorPassword(this.inbound,this.sharedPassword);this.$emit('change',nodeEditorConfig(this.inbound));},streamNetworkChange(oldValue){if(oldValue==='kcp')this.inbound.tls=false;}},
         mounted(){this.publish();}
     });
 
@@ -141,6 +208,11 @@
             }
         },
         methods: {
+            hasLegacyPassword(inbound){return hasLegacyInboundPassword(inboundPasswordSnapshot(inbound,role==='manager'?inModal.effectiveSharedPassword():''),inModal.originalPasswords.default,role==='manager'?inModal.unchangedSharedPassword():null);},
+            hasLegacySharedPassword(){
+                const password=inModal.effectiveSharedPassword();
+                return (!!password&&!validInboundPassword(password)&&password===inModal.originalPasswords.shared)||this.hasLegacyPassword(inModal.inbound)||Object.keys(inModal.overrides).some(id=>hasLegacyInboundPassword(inboundPasswordSnapshot(inModal.overrides[id],password),inModal.originalPasswords.nodes[id]));
+            },
             toggleOverride(id,enabled){if(enabled)this.$set(inModal.overrides,id,nodeEditorConfig(inModal.inbound));else this.$delete(inModal.overrides,id);},
             streamNetworkChange(oldValue) {
                 if (oldValue === 'kcp') {
