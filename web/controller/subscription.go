@@ -2,6 +2,8 @@ package controller
 
 import (
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"xui/web/service"
@@ -40,8 +42,36 @@ func (a *SubscriptionController) clash(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	// 不管哪个入站、哪个用户，订阅显示名统一是 XUI。
-	// 客户端取 Content-Disposition 里的文件名当订阅名，所以这里不带扩展名和前缀。
-	c.Header("Content-Disposition", `attachment; filename="XUI"; filename*=UTF-8''XUI`)
+	// 订阅显示名用入站列表里的用户名（remark）。客户端优先读 filename*，
+	// 按 RFC 5987 做百分号编码，中文用户名也能正常显示。
+	c.Header("Content-Disposition", subscriptionDisposition(inbound.Remark))
 	c.Data(http.StatusOK, "text/yaml; charset=utf-8", data)
+}
+
+// subscriptionDisposition 生成订阅的文件名头：filename* 带真实用户名，
+// filename 留一个 ASCII 兜底，避免老客户端把整串百分号编码当成名字。
+func subscriptionDisposition(remark string) string {
+	name := strings.TrimSpace(remark)
+	// 去掉控制字符和会破坏头部的符号
+	name = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == '"' || r == '\\' || r == '/' || r == ';' {
+			return -1
+		}
+		return r
+	}, name)
+	if runes := []rune(name); len(runes) > 64 {
+		name = string(runes[:64])
+	}
+	if name == "" {
+		name = "XUI"
+	}
+	// HTTP 头只能是 ASCII，非 ASCII 用户名只放在 filename* 里，filename 退回 XUI 兜底
+	ascii := name
+	for _, r := range name {
+		if r > 0x7F {
+			ascii = "XUI"
+			break
+		}
+	}
+	return `attachment; filename="` + ascii + `"; filename*=UTF-8''` + url.PathEscape(name)
 }
