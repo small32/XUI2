@@ -40,6 +40,8 @@ func (a *SubscriptionController) clash(c *gin.Context) {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	c.Header("Content-Disposition", `attachment; filename="xui-clash.yaml"`)
+	// 不管哪个入站、哪个用户，订阅显示名统一是 XUI。
+	// 客户端取 Content-Disposition 里的文件名当订阅名，所以这里不带扩展名和前缀。
+	c.Header("Content-Disposition", `attachment; filename="XUI"; filename*=UTF-8''XUI`)
 	c.Data(http.StatusOK, "text/yaml; charset=utf-8", data)
 }
